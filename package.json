@@ -1,26 +1,22 @@
 {
   "name": "fusion-starter",
-  "private": true,
+  "private": false,
   "type": "module",
   "pkg": {
     "assets": [
       "dist/spa/*"
     ],
-    "scripts": [
-      "dist/server/**/*.js"
-    ]
-  },
-  "scripts": {
-    "dev": "vite",
-    "build": "npm run build:client && npm run build:server",
-    "build:client": "vite build",
-    "build:server": "vite build --config vite.config.server.ts",
-    "start": "node dist/server/node-build.mjs",
-    "test": "vitest --run",
-    "format.fix": "prettier --write .",
-    "typecheck": "tsc",
-    "deploy": "gh-pages -d dist"
-  },
+    "scripts": {
+  "dev": "vite",
+  "build": "npm run build:client && npm run build:server",
+  "build:client": "vite build",
+  "build:server": "tsc -p tsconfig.server.json",
+  "start": "node dist/server/index.js",
+  "test": "vitest --run",
+  "format.fix": "prettier --write .",
+  "typecheck": "tsc",
+  "deploy": "gh-pages -d dist"
+    },
   "dependencies": {
     "@google-cloud/translate": "^9.2.0",
     "axios": "^1.11.0",
