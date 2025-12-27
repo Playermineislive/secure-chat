@@ -11,14 +11,22 @@ import {
   verifyToken, 
   getUserById 
 } from "./routes/auth";
-import { 
-  handleGenerateCode, 
-  handleConnectCode, 
-  handleGetConnectionStatus, 
-  handleDisconnect, 
-  authenticateUser, 
-  getPartnerIdForUser 
+import {
+  handleGenerateCode,
+  handleConnectCode,
+  handleGetConnectionStatus,
+  handleDisconnect,
+  authenticateUser,
+  getPartnerIdForUser
 } from "./routes/pairing";
+import {
+  handleSendInviteRequest,
+  handleRespondToInviteRequest,
+  handleGetInviteRequests,
+  handleRegisterInviteCode,
+  getInviteRequestsForUser,
+  findUserByInviteCode
+} from "./routes/invites";
 import { WebSocketMessage } from "@shared/api";
 
 export function createAppServer() {
@@ -56,6 +64,12 @@ export function createAppServer() {
   app.post("/api/pairing/connect-code", authenticateUser, handleConnectCode);
   app.get("/api/pairing/status", authenticateUser, handleGetConnectionStatus);
   app.post("/api/pairing/disconnect", authenticateUser, handleDisconnect);
+
+  // Invite request routes (require authentication)
+  app.post("/api/invites/send", authenticateUser, handleSendInviteRequest);
+  app.post("/api/invites/respond", authenticateUser, handleRespondToInviteRequest);
+  app.get("/api/invites", authenticateUser, handleGetInviteRequests);
+  app.post("/api/invites/register-code", authenticateUser, handleRegisterInviteCode);
 
   // WebSocket authentication middleware
   io.use((socket, next) => {
@@ -204,10 +218,94 @@ export function createAppServer() {
       }
     });
 
+    // Handle invite requests
+    socket.on("send_invite_request", (data: { code: string }) => {
+      try {
+        console.log(`Invite request sent by ${socket.userEmail} for code: ${data.code}`);
+
+        // Find the user with this invite code
+        const receiverId = findUserByInviteCode(data.code);
+        if (!receiverId) {
+          socket.emit("error", { message: "Invalid invite code" });
+          return;
+        }
+
+        // Get receiver's socket
+        const receiverSocketId = userSockets.get(receiverId);
+        if (receiverSocketId) {
+          // Create invite request
+          const inviteRequest = {
+            id: `invite_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+            senderId: socket.userId,
+            senderEmail: socket.userEmail,
+            senderUsername: socket.userEmail.split('@')[0],
+            receiverId,
+            code: data.code,
+            timestamp: new Date().toISOString(),
+            status: 'pending',
+            expiresAt: new Date(Date.now() + 24 * 60 * 60 * 1000).toISOString(),
+          };
+
+          // Send to receiver
+          const message: WebSocketMessage = {
+            type: "invite_request",
+            data: inviteRequest,
+            timestamp: new Date().toISOString(),
+          };
+          io.to(receiverSocketId).emit("message", message);
+
+          // Confirm to sender
+          socket.emit("invite_sent", { success: true, requestId: inviteRequest.id });
+        } else {
+          socket.emit("error", { message: "Recipient is not online" });
+        }
+      } catch (error) {
+        console.error("Invite request error:", error);
+        socket.emit("error", { message: "Failed to send invite request" });
+      }
+    });
+
+    // Handle invite request responses
+    socket.on("respond_invite_request", (data: { requestId: string; response: 'accept' | 'reject' }) => {
+      try {
+        console.log(`Invite response from ${socket.userEmail}: ${data.response}`);
+
+        // In a real app, you'd look up the original request and sender
+        // For now, we'll create a notification for the demo
+        const notification = {
+          id: `notification_${Date.now()}`,
+          type: data.response === 'accept' ? 'invite_accepted' : 'invite_rejected',
+          senderId: socket.userId,
+          senderEmail: socket.userEmail,
+          senderUsername: socket.userEmail.split('@')[0],
+          timestamp: new Date().toISOString(),
+          requestId: data.requestId,
+          message: data.response === 'accept'
+            ? `${socket.userEmail} accepted your invite request!`
+            : `${socket.userEmail} declined your invite request.`
+        };
+
+        // In a real app, you'd send this to the original sender
+        // For demo, we'll just confirm the response
+        socket.emit("invite_response_sent", { success: true });
+
+        // Broadcast to all connected users for demo (in real app, send only to original sender)
+        io.emit("message", {
+          type: "invite_response",
+          data: notification,
+          timestamp: new Date().toISOString(),
+        });
+
+      } catch (error) {
+        console.error("Invite response error:", error);
+        socket.emit("error", { message: "Failed to process invite response" });
+      }
+    });
+
     // Handle disconnection
     socket.on("disconnect", () => {
       console.log(`User disconnected: ${socket.userEmail} (${socket.userId})`);
-      
+
       // Remove from active connections
       userSockets.delete(socket.userId);
       userPublicKeys.delete(socket.userId);
@@ -258,6 +356,12 @@ export function createServer() {
   app.post("/api/pairing/connect-code", authenticateUser, handleConnectCode);
   app.get("/api/pairing/status", authenticateUser, handleGetConnectionStatus);
   app.post("/api/pairing/disconnect", authenticateUser, handleDisconnect);
+
+  // Invite request routes (require authentication)
+  app.post("/api/invites/send", authenticateUser, handleSendInviteRequest);
+  app.post("/api/invites/respond", authenticateUser, handleRespondToInviteRequest);
+  app.get("/api/invites", authenticateUser, handleGetInviteRequests);
+  app.post("/api/invites/register-code", authenticateUser, handleRegisterInviteCode);
 
   return app;
 }

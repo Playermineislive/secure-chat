@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { SocketProvider } from '../contexts/SocketContext';
-import { ContactProvider } from '../contexts/ContactContext';
+import { ContactProvider, useContacts } from '../contexts/ContactContext';
+import { InviteRequest, InviteNotification } from '@shared/api';
 import Auth from './Auth';
 import Pairing from './Pairing';
 import Chat from './Chat';
@@ -64,6 +65,7 @@ interface GroupInfo {
 
 export default function Index() {
   const { isAuthenticated, isLoading, token, user } = useAuth();
+  const { addInviteRequest, addInviteNotification } = useContacts();
   const [appState, setAppState] = useState<AppState>('auth');
   const [partner, setPartner] = useState<Contact | null>(null);
   const [currentGroup, setCurrentGroup] = useState<GroupInfo | null>(null);
@@ -197,6 +199,16 @@ export default function Index() {
 
   const handleUpdateGroup = (updatedGroup: GroupInfo) => {
     setCurrentGroup(updatedGroup);
+  };
+
+  const handleInviteRequest = (request: InviteRequest) => {
+    console.log('📨 Received invite request in Index:', request);
+    addInviteRequest(request);
+  };
+
+  const handleInviteResponse = (notification: InviteNotification) => {
+    console.log('📨 Received invite response in Index:', notification);
+    addInviteNotification(notification);
   };
 
   // Enhanced loading screen with stats
@@ -339,7 +351,10 @@ export default function Index() {
           exit={{ opacity: 0, x: 50 }}
           transition={{ duration: 0.3 }}
         >
-          <SocketProvider>
+          <SocketProvider
+            onInviteRequest={handleInviteRequest}
+            onInviteResponse={handleInviteResponse}
+          >
             <Pairing onPaired={(partnerInfo) => {
               const contact: Contact = {
                 id: partnerInfo.id,
@@ -361,7 +376,10 @@ export default function Index() {
           exit={{ opacity: 0, x: 50 }}
           transition={{ duration: 0.3 }}
         >
-          <SocketProvider>
+          <SocketProvider
+            onInviteRequest={handleInviteRequest}
+            onInviteResponse={handleInviteResponse}
+          >
             <Chat partner={partner} onDisconnect={handleDisconnect} />
           </SocketProvider>
         </motion.div>
@@ -375,9 +393,12 @@ export default function Index() {
           exit={{ opacity: 0, x: 50 }}
           transition={{ duration: 0.3 }}
         >
-          <SocketProvider>
-            <GroupChat 
-              group={currentGroup} 
+          <SocketProvider
+            onInviteRequest={handleInviteRequest}
+            onInviteResponse={handleInviteResponse}
+          >
+            <GroupChat
+              group={currentGroup}
               onBack={handleBackToContacts}
               onUpdateGroup={handleUpdateGroup}
             />

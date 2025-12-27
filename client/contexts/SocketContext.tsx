@@ -2,7 +2,7 @@ import React, { createContext, useContext, useEffect, useState, ReactNode } from
 import { io, Socket } from 'socket.io-client';
 import { useAuth } from './AuthContext';
 import { useEncryption } from './EncryptionContext';
-import { WebSocketMessage, ChatMessage, MediaContent } from '@shared/api';
+import { WebSocketMessage, ChatMessage, MediaContent, InviteRequest, InviteNotification } from '@shared/api';
 import { EncryptedMessage, EncryptedFile, isValidEncryptedMessage, isValidEncryptedFile, cleanEncryptedMessage } from '../utils/crypto';
 
 interface SocketContextType {
@@ -16,15 +16,21 @@ interface SocketContextType {
   partnerOnline: boolean;
   clearMessages: () => void;
   keyExchangeComplete: boolean;
+  sendInviteRequest: (code: string) => void;
+  respondToInviteRequest: (requestId: string, response: 'accept' | 'reject') => void;
+  onInviteRequest?: (request: InviteRequest) => void;
+  onInviteResponse?: (notification: InviteNotification) => void;
 }
 
 const SocketContext = createContext<SocketContextType | undefined>(undefined);
 
 interface SocketProviderProps {
   children: ReactNode;
+  onInviteRequest?: (request: InviteRequest) => void;
+  onInviteResponse?: (notification: InviteNotification) => void;
 }
 
-export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
+export const SocketProvider: React.FC<SocketProviderProps> = ({ children, onInviteRequest, onInviteResponse }) => {
   const { token, isAuthenticated, user } = useAuth();
   const {
     keyPair,
@@ -257,7 +263,21 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
             setPartnerOnline(false);
             setPartnerTyping(false);
             break;
-            
+
+          case 'invite_request':
+            console.log('📨 Received invite request:', wsMessage.data);
+            if (onInviteRequest) {
+              onInviteRequest(wsMessage.data);
+            }
+            break;
+
+          case 'invite_response':
+            console.log('📨 Received invite response:', wsMessage.data);
+            if (onInviteResponse) {
+              onInviteResponse(wsMessage.data);
+            }
+            break;
+
           case 'error':
             console.error('WebSocket error:', wsMessage.data);
             break;
@@ -390,6 +410,24 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     }
   };
 
+  const sendInviteRequest = (code: string) => {
+    if (socket && socket.connected) {
+      console.log('📤 Sending invite request for code:', code);
+      socket.emit('send_invite_request', { code });
+    } else {
+      console.warn('⚠️ Socket not connected, cannot send invite request');
+    }
+  };
+
+  const respondToInviteRequest = (requestId: string, response: 'accept' | 'reject') => {
+    if (socket && socket.connected) {
+      console.log('📤 Responding to invite request:', requestId, response);
+      socket.emit('respond_invite_request', { requestId, response });
+    } else {
+      console.warn('⚠️ Socket not connected, cannot respond to invite request');
+    }
+  };
+
   const clearMessages = () => {
     setMessages([]);
   };
@@ -405,6 +443,10 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     partnerOnline,
     clearMessages,
     keyExchangeComplete,
+    sendInviteRequest,
+    respondToInviteRequest,
+    onInviteRequest,
+    onInviteResponse,
   };
 
   return (

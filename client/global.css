@@ -30,7 +30,10 @@
 
   /* Improve touch target sizes for mobile */
   @media (max-width: 768px) {
-    input, button, textarea, select {
+    input,
+    button,
+    textarea,
+    select {
       min-height: 48px;
     }
   }
@@ -85,7 +88,9 @@
   }
 
   /* Smooth transitions for all interactive elements */
-  button, input, [role="button"] {
+  button,
+  input,
+  [role="button"] {
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   }
 
@@ -208,7 +213,11 @@
 
   body {
     @apply bg-background text-foreground antialiased;
-    background: linear-gradient(135deg, hsl(var(--background)) 0%, hsl(var(--muted)) 100%);
+    background: linear-gradient(
+      135deg,
+      hsl(var(--background)) 0%,
+      hsl(var(--muted)) 100%
+    );
     min-height: 100vh;
   }
 }
@@ -258,11 +267,19 @@
 
   /* Enhanced gradient backgrounds */
   .gradient-primary {
-    background: linear-gradient(135deg, hsl(var(--chat-primary)) 0%, hsl(var(--chat-secondary)) 100%);
+    background: linear-gradient(
+      135deg,
+      hsl(var(--chat-primary)) 0%,
+      hsl(var(--chat-secondary)) 100%
+    );
   }
 
   .gradient-card {
-    background: linear-gradient(145deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
+    background: linear-gradient(
+      145deg,
+      rgba(255, 255, 255, 0.1) 0%,
+      rgba(255, 255, 255, 0.05) 100%
+    );
   }
 
   /* Floating animation for elements */
@@ -277,7 +294,12 @@
 
   /* Shimmer effect for loading states */
   .shimmer {
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(255, 255, 255, 0.1),
+      transparent
+    );
     background-size: 200% 100%;
     animation: shimmer 2s ease-in-out infinite;
   }
@@ -316,7 +338,8 @@
   }
 
   @keyframes pulse {
-    0%, 100% {
+    0%,
+    100% {
       opacity: 1;
     }
     50% {
@@ -347,7 +370,8 @@
   }
 
   @keyframes float {
-    0%, 100% {
+    0%,
+    100% {
       transform: translateY(0px) rotate(0deg);
     }
     50% {
@@ -365,7 +389,8 @@
   }
 
   @keyframes gradientShift {
-    0%, 100% {
+    0%,
+    100% {
       background-position: 0% 50%;
     }
     50% {
@@ -374,7 +399,8 @@
   }
 
   @keyframes breathe {
-    0%, 100% {
+    0%,
+    100% {
       transform: scale(1);
     }
     50% {
@@ -405,13 +431,66 @@
   }
 
   @keyframes sparkle {
-    0%, 100% {
+    0%,
+    100% {
       opacity: 0;
       transform: scale(0) rotate(0deg);
     }
     50% {
       opacity: 1;
       transform: scale(1) rotate(180deg);
+    }
+  }
+
+  @keyframes glow {
+    0%,
+    100% {
+      opacity: 1;
+      transform: scale(1);
+      box-shadow: 0 0 20px rgba(139, 92, 246, 0.3);
+    }
+    50% {
+      opacity: 0.8;
+      transform: scale(1.05);
+      box-shadow: 0 0 30px rgba(139, 92, 246, 0.6);
+    }
+  }
+
+  @keyframes messageGlow {
+    0%,
+    100% {
+      box-shadow: 0 4px 15px rgba(139, 92, 246, 0.2);
+    }
+    50% {
+      box-shadow: 0 8px 25px rgba(139, 92, 246, 0.4);
+    }
+  }
+
+  @keyframes heartBeat {
+    0%,
+    100% {
+      transform: scale(1);
+    }
+    25% {
+      transform: scale(1.1);
+    }
+    50% {
+      transform: scale(1.2);
+    }
+    75% {
+      transform: scale(1.1);
+    }
+  }
+
+  @keyframes weatherPulse {
+    0%,
+    100% {
+      opacity: 0.8;
+      transform: translateY(0px);
+    }
+    50% {
+      opacity: 1;
+      transform: translateY(-5px);
     }
   }
 
@@ -453,9 +532,27 @@
     animation: sparkle 2s ease-in-out infinite;
   }
 
+  .animate-glow {
+    animation: glow 2s ease-in-out infinite;
+  }
+
+  .animate-message-glow {
+    animation: messageGlow 3s ease-in-out infinite;
+  }
+
+  .animate-heart-beat {
+    animation: heartBeat 1.5s ease-in-out infinite;
+  }
+
+  .animate-weather-pulse {
+    animation: weatherPulse 3s ease-in-out infinite;
+  }
+
   /* Enhanced hover effects */
   .hover-lift {
-    transition: transform 0.3s ease, box-shadow 0.3s ease;
+    transition:
+      transform 0.3s ease,
+      box-shadow 0.3s ease;
   }
 
   .hover-lift:hover {
@@ -504,6 +601,136 @@
   @supports (-webkit-touch-callout: none) {
     .min-h-screen {
       min-height: -webkit-fill-available;
+    }
+  }
+
+  /* Theme-specific patterns and effects */
+  .theme-love {
+    background-image:
+      radial-gradient(
+        circle at 25% 25%,
+        rgba(255, 105, 180, 0.2) 0%,
+        transparent 50%
+      ),
+      radial-gradient(
+        circle at 75% 75%,
+        rgba(255, 20, 147, 0.2) 0%,
+        transparent 50%
+      );
+  }
+
+  .theme-ocean {
+    background-image:
+      linear-gradient(45deg, rgba(70, 195, 247, 0.1) 25%, transparent 25%),
+      linear-gradient(-45deg, rgba(70, 195, 247, 0.1) 25%, transparent 25%),
+      linear-gradient(45deg, transparent 75%, rgba(70, 195, 247, 0.1) 75%),
+      linear-gradient(-45deg, transparent 75%, rgba(70, 195, 247, 0.1) 75%);
+    background-size: 30px 30px;
+    background-position:
+      0 0,
+      0 15px,
+      15px -15px,
+      -15px 0px;
+  }
+
+  .theme-galaxy {
+    background-image:
+      radial-gradient(
+        2px 2px at 20px 30px,
+        rgba(255, 215, 0, 0.8),
+        transparent
+      ),
+      radial-gradient(
+        2px 2px at 40px 70px,
+        rgba(255, 255, 255, 0.6),
+        transparent
+      ),
+      radial-gradient(
+        1px 1px at 90px 40px,
+        rgba(255, 215, 0, 0.5),
+        transparent
+      ),
+      radial-gradient(
+        1px 1px at 130px 80px,
+        rgba(255, 255, 255, 0.4),
+        transparent
+      );
+    background-repeat: repeat;
+    background-size: 200px 100px;
+  }
+
+  .theme-weather-sunny {
+    background-image: radial-gradient(
+      circle at 50% 20%,
+      rgba(255, 215, 0, 0.3) 0%,
+      transparent 50%
+    );
+  }
+
+  .theme-weather-rainy {
+    background-image: repeating-linear-gradient(
+      90deg,
+      transparent,
+      transparent 98px,
+      rgba(79, 195, 247, 0.1) 100px
+    );
+  }
+
+  /* Weather theme animations */
+  .weather-rain-animation {
+    position: relative;
+    overflow: hidden;
+  }
+
+  .weather-rain-animation::before {
+    content: "";
+    position: absolute;
+    top: -50%;
+    left: 0;
+    width: 100%;
+    height: 200%;
+    background-image: linear-gradient(
+      180deg,
+      transparent 0%,
+      rgba(79, 195, 247, 0.3) 50%,
+      transparent 100%
+    );
+    background-size: 2px 20px;
+    background-repeat: repeat-x;
+    animation: rainFall 2s linear infinite;
+  }
+
+  @keyframes rainFall {
+    0% {
+      transform: translateY(-100%);
+    }
+    100% {
+      transform: translateY(100%);
+    }
+  }
+
+  .weather-snow-animation::before {
+    content: "";
+    position: absolute;
+    top: -50%;
+    left: 0;
+    width: 100%;
+    height: 200%;
+    background-image: radial-gradient(
+      circle,
+      rgba(255, 255, 255, 0.8) 1px,
+      transparent 1px
+    );
+    background-size: 20px 20px;
+    animation: snowFall 10s linear infinite;
+  }
+
+  @keyframes snowFall {
+    0% {
+      transform: translateY(-100%) translateX(0px);
+    }
+    100% {
+      transform: translateY(100%) translateX(50px);
     }
   }
 

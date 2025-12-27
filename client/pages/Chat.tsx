@@ -1,13 +1,20 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
-import { motion, AnimatePresence } from 'framer-motion';
-import { useAuth } from '../contexts/AuthContext';
-import { useSocket } from '../contexts/SocketContext';
-import { useEncryption } from '../contexts/EncryptionContext';
-import { useTranslation } from '../contexts/TranslationContext';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
+import React, {
+  useState,
+  useEffect,
+  useRef,
+  useCallback,
+  useMemo,
+} from "react";
+import { motion, AnimatePresence } from "framer-motion";
+import { useAuth } from "../contexts/AuthContext";
+import { useSocket } from "../contexts/SocketContext";
+import { useEncryption } from "../contexts/EncryptionContext";
+import { useTranslation } from "../contexts/TranslationContext";
+import { useTheme } from "../contexts/ThemeContext";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
 import {
   Send,
   Shield,
@@ -35,14 +42,16 @@ import {
   Heart,
   Coffee,
   Music,
-  ArrowLeft
-} from 'lucide-react';
-import { ChatMessage, FileUpload, MediaContent } from '@shared/api';
-import MessageBubble from '../components/MessageBubble';
-import MediaUpload from '../components/MediaUpload';
-import EmojiPicker from '../components/EmojiPicker';
-import TranslationSettings from '../components/TranslationSettings';
-import DebugPanel from '../components/DebugPanel';
+  ArrowLeft,
+  Palette,
+} from "lucide-react";
+import { ChatMessage, FileUpload, MediaContent } from "@shared/api";
+import MessageBubble from "../components/MessageBubble";
+import MediaUpload from "../components/MediaUpload";
+import EmojiPicker from "../components/EmojiPicker";
+import TranslationSettings from "../components/TranslationSettings";
+import DebugPanel from "../components/DebugPanel";
+import ThemeSelector from "../components/ThemeSelector";
 
 interface ChatProps {
   partner: { id: string; email: string };
@@ -52,32 +61,35 @@ interface ChatProps {
 
 export default function Chat({ partner, onDisconnect, onBack }: ChatProps) {
   const { user } = useAuth();
-  const { 
-    messages, 
-    sendMessage, 
-    sendTyping, 
-    partnerTyping, 
-    partnerOnline, 
+  const {
+    messages,
+    sendMessage,
+    sendTyping,
+    partnerTyping,
+    partnerOnline,
     isConnected,
-    sendFile 
+    sendFile,
   } = useSocket();
   // Encryption is handled in SocketContext
-  const { 
-    isTranslationEnabled, 
-    targetLanguage, 
+  const {
+    isTranslationEnabled,
+    targetLanguage,
     translateMessage,
-    supportedLanguages 
+    supportedLanguages,
   } = useTranslation();
+  const { currentTheme, isWeatherEnabled, currentWeather } = useTheme();
 
-  const [newMessage, setNewMessage] = useState('');
+  const [newMessage, setNewMessage] = useState("");
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showTranslationSettings, setShowTranslationSettings] = useState(false);
   const [showMediaUpload, setShowMediaUpload] = useState(false);
+  const [showThemeSelector, setShowThemeSelector] = useState(false);
   const [isTyping, setIsTyping] = useState(false);
-  const [searchQuery, setSearchQuery] = useState('');
+  const [searchQuery, setSearchQuery] = useState("");
   const [showSearch, setShowSearch] = useState(false);
-  const [messageReactions, setMessageReactions] = useState<{[key: string]: string[]}>({});
-  const [chatTheme, setChatTheme] = useState(0);
+  const [messageReactions, setMessageReactions] = useState<{
+    [key: string]: string[];
+  }>({});
   const [showDebugPanel, setShowDebugPanel] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -87,9 +99,10 @@ export default function Chat({ partner, onDisconnect, onBack }: ChatProps) {
   // Optimized message filtering
   const filteredMessages = useMemo(() => {
     if (!searchQuery) return messages;
-    return messages.filter(msg => 
-      msg.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      msg.senderEmail.toLowerCase().includes(searchQuery.toLowerCase())
+    return messages.filter(
+      (msg) =>
+        msg.content.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        msg.senderEmail.toLowerCase().includes(searchQuery.toLowerCase()),
     );
   }, [messages, searchQuery]);
 
@@ -99,32 +112,32 @@ export default function Chat({ partner, onDisconnect, onBack }: ChatProps) {
       name: "Ocean Breeze",
       bg: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
       messageUser: "from-blue-500 to-purple-600",
-      messagePartner: "from-gray-600 to-gray-700"
+      messagePartner: "from-gray-600 to-gray-700",
     },
     {
       name: "Sunset Glow",
       bg: "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)",
       messageUser: "from-pink-500 to-rose-600",
-      messagePartner: "from-gray-600 to-gray-700"
+      messagePartner: "from-gray-600 to-gray-700",
     },
     {
       name: "Forest Night",
       bg: "linear-gradient(135deg, #134e5e 0%, #71b280 100%)",
       messageUser: "from-green-500 to-emerald-600",
-      messagePartner: "from-gray-600 to-gray-700"
-    }
+      messagePartner: "from-gray-600 to-gray-700",
+    },
   ];
 
-  const currentTheme = chatThemes[chatTheme];
+  const localChatTheme = chatThemes[chatTheme];
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
 
   useEffect(() => {
     // Auto-cycle chat themes
     const themeInterval = setInterval(() => {
-      setChatTheme(prev => (prev + 1) % chatThemes.length);
+      setChatTheme((prev) => (prev + 1) % chatThemes.length);
     }, 30000);
 
     return () => clearInterval(themeInterval);
@@ -136,65 +149,102 @@ export default function Chat({ partner, onDisconnect, onBack }: ChatProps) {
     try {
       // For now, send messages as plain text since encryption is handled in SocketContext
       // The SocketContext will handle encryption with available keys
-      sendMessage(newMessage, 'text');
-      setNewMessage('');
+      sendMessage(newMessage, "text");
+      setNewMessage("");
       setIsTyping(false);
     } catch (error) {
-      console.error('Failed to send message:', error);
+      console.error("Failed to send message:", error);
     }
   }, [newMessage, sendMessage]);
 
-  const handleTyping = useCallback((value: string) => {
-    setNewMessage(value);
-    
-    if (!isTyping) {
-      setIsTyping(true);
-      sendTyping(true);
-    }
+  const handleTyping = useCallback(
+    (value: string) => {
+      setNewMessage(value);
 
-    clearTimeout(typingTimeoutRef.current);
-    typingTimeoutRef.current = setTimeout(() => {
-      setIsTyping(false);
-      sendTyping(false);
-    }, 1000);
-  }, [isTyping, sendTyping]);
+      if (!isTyping) {
+        setIsTyping(true);
+        sendTyping(true);
+      }
 
-  const handleFileUpload = useCallback(async (file: File) => {
-    try {
-      await sendFile(file);
-      setShowMediaUpload(false);
-    } catch (error) {
-      console.error('Failed to send file:', error);
-    }
-  }, [sendFile]);
+      clearTimeout(typingTimeoutRef.current);
+      typingTimeoutRef.current = setTimeout(() => {
+        setIsTyping(false);
+        sendTyping(false);
+      }, 1000);
+    },
+    [isTyping, sendTyping],
+  );
+
+  const handleFileUpload = useCallback(
+    async (file: File) => {
+      try {
+        await sendFile(file);
+        setShowMediaUpload(false);
+      } catch (error) {
+        console.error("Failed to send file:", error);
+      }
+    },
+    [sendFile],
+  );
 
   const addReaction = useCallback((messageId: string, emoji: string) => {
-    setMessageReactions(prev => ({
+    setMessageReactions((prev) => ({
       ...prev,
-      [messageId]: [...(prev[messageId] || []), emoji]
+      [messageId]: [...(prev[messageId] || []), emoji],
     }));
   }, []);
 
   const quickActions = [
-    { icon: Phone, label: "Voice Call", action: () => console.log('Voice call') },
-    { icon: Video, label: "Video Call", action: () => console.log('Video call') },
+    {
+      icon: Phone,
+      label: "Voice Call",
+      action: () => console.log("Voice call"),
+    },
+    {
+      icon: Video,
+      label: "Video Call",
+      action: () => console.log("Video call"),
+    },
     { icon: Search, label: "Search", action: () => setShowSearch(!showSearch) },
-    { icon: Settings, label: "Settings", action: () => setShowTranslationSettings(true) },
-    { icon: AlertTriangle, label: "Debug", action: () => setShowDebugPanel(true) }
+    {
+      icon: Palette,
+      label: "Themes",
+      action: () => setShowThemeSelector(true),
+    },
+    {
+      icon: Settings,
+      label: "Settings",
+      action: () => setShowTranslationSettings(true),
+    },
+    {
+      icon: AlertTriangle,
+      label: "Debug",
+      action: () => setShowDebugPanel(true),
+    },
   ];
 
-  const quickReactions = ['❤️', '😊', '👍', '😂', '😮', '😢'];
+  const quickReactions = ["❤️", "😊", "👍", "😂", "😮", "😢"];
 
   return (
     <div className="h-screen flex flex-col relative overflow-hidden">
-      {/* Animated background */}
-      <motion.div 
+      {/* Animated background with theme */}
+      <motion.div
         className="absolute inset-0"
-        style={{ background: currentTheme.bg }}
+        style={{ background: localChatTheme.background }}
         animate={{ opacity: [0.8, 1, 0.8] }}
         transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
       />
-      
+
+      {/* Theme pattern overlay */}
+      {localChatTheme.pattern && (
+        <motion.div
+          className="absolute inset-0 opacity-20"
+          style={{ backgroundImage: localChatTheme.pattern }}
+          animate={{ opacity: [0.1, 0.3, 0.1] }}
+          transition={{ duration: 8, repeat: Infinity, ease: "easeInOut" }}
+        />
+      )}
+
       {/* Floating elements for ambiance */}
       <div className="absolute inset-0 pointer-events-none">
         {[...Array(4)].map((_, i) => (
@@ -203,25 +253,25 @@ export default function Chat({ partner, onDisconnect, onBack }: ChatProps) {
             className={`absolute w-4 h-4 rounded-full bg-white/10 backdrop-blur-sm`}
             style={{
               left: `${Math.random() * 100}%`,
-              top: `${Math.random() * 100}%`
+              top: `${Math.random() * 100}%`,
             }}
             animate={{
               y: [0, -20, 0],
               opacity: [0.3, 0.8, 0.3],
-              scale: [0.8, 1.2, 0.8]
+              scale: [0.8, 1.2, 0.8],
             }}
             transition={{
               duration: 6 + i * 2,
               repeat: Infinity,
-              ease: "easeInOut"
+              ease: "easeInOut",
             }}
           />
         ))}
       </div>
 
       {/* Header */}
-      <motion.header 
-        className="relative z-10 bg-white/10 backdrop-blur-xl border-b border-white/20"
+      <motion.header
+        className={`relative z-10 ${localChatTheme.headerStyle.background} backdrop-blur-xl border-b border-white/20`}
         initial={{ y: -50, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ duration: 0.5 }}
@@ -239,7 +289,7 @@ export default function Chat({ partner, onDisconnect, onBack }: ChatProps) {
                 <ArrowLeft className="w-5 h-5" />
               </motion.button>
             )}
-            <motion.div 
+            <motion.div
               className="relative"
               whileHover={{ scale: 1.1 }}
               whileTap={{ scale: 0.9 }}
@@ -248,25 +298,27 @@ export default function Chat({ partner, onDisconnect, onBack }: ChatProps) {
                 <User className="w-6 h-6 text-white" />
               </div>
               {partnerOnline && (
-                <motion.div 
+                <motion.div
                   className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white"
                   animate={{ scale: [1, 1.2, 1] }}
                   transition={{ duration: 2, repeat: Infinity }}
                 />
               )}
             </motion.div>
-            
+
             <div>
-              <h2 className="text-white font-semibold text-lg">{partner.email}</h2>
+              <h2 className="text-white font-semibold text-lg">
+                {partner.email}
+              </h2>
               <div className="flex items-center space-x-2">
-                <motion.div 
-                  className={`w-2 h-2 rounded-full ${partnerOnline ? 'bg-green-400' : 'bg-gray-400'}`}
+                <motion.div
+                  className={`w-2 h-2 rounded-full ${partnerOnline ? "bg-green-400" : "bg-gray-400"}`}
                   animate={partnerOnline ? { opacity: [0.5, 1, 0.5] } : {}}
                   transition={{ duration: 2, repeat: Infinity }}
                 />
                 <span className="text-white/70 text-sm">
-                  {partnerOnline ? 'Online' : 'Offline'}
-                  {partnerTyping && ' • typing...'}
+                  {partnerOnline ? "Online" : "Offline"}
+                  {partnerTyping && " • typing..."}
                 </span>
               </div>
             </div>
@@ -285,7 +337,7 @@ export default function Chat({ partner, onDisconnect, onBack }: ChatProps) {
                 <action.icon className="w-5 h-5" />
               </motion.button>
             ))}
-            
+
             <motion.button
               onClick={onDisconnect}
               className="w-10 h-10 bg-red-500/20 hover:bg-red-500/30 rounded-[1rem] flex items-center justify-center text-red-300 hover:text-red-200 transition-all duration-200 backdrop-blur-sm"
@@ -303,7 +355,7 @@ export default function Chat({ partner, onDisconnect, onBack }: ChatProps) {
             <motion.div
               className="px-4 pb-4"
               initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
+              animate={{ height: "auto", opacity: 1 }}
               exit={{ height: 0, opacity: 0 }}
               transition={{ duration: 0.3 }}
             >
@@ -318,12 +370,14 @@ export default function Chat({ partner, onDisconnect, onBack }: ChatProps) {
         </AnimatePresence>
 
         {/* Theme indicator */}
-        <motion.div 
+        <motion.div
           className="absolute top-4 left-1/2 transform -translate-x-1/2 px-3 py-1 bg-white/10 rounded-[1rem] backdrop-blur-sm"
           animate={{ y: [0, -2, 0] }}
           transition={{ duration: 3, repeat: Infinity }}
         >
-          <span className="text-white/80 text-xs font-medium">{currentTheme.name}</span>
+          <span className="text-white/80 text-xs font-medium">
+            {localChatTheme.name}
+          </span>
         </motion.div>
       </motion.header>
 
@@ -333,15 +387,15 @@ export default function Chat({ partner, onDisconnect, onBack }: ChatProps) {
           {filteredMessages.map((message, index) => (
             <motion.div
               key={`${message.id}-${index}`}
-              className={`flex ${message.senderEmail === user?.email ? 'justify-end' : 'justify-start'}`}
+              className={`flex ${message.senderEmail === user?.email ? "justify-end" : "justify-start"}`}
               initial={{ opacity: 0, y: 20, scale: 0.8 }}
               animate={{ opacity: 1, y: 0, scale: 1 }}
               exit={{ opacity: 0, y: -20, scale: 0.8 }}
-              transition={{ 
-                duration: 0.3, 
+              transition={{
+                duration: 0.3,
                 delay: index * 0.05,
                 type: "spring",
-                bounce: 0.3
+                bounce: 0.3,
               }}
               layout
             >
@@ -349,8 +403,8 @@ export default function Chat({ partner, onDisconnect, onBack }: ChatProps) {
                 <motion.div
                   className={`p-4 rounded-[2rem] backdrop-blur-sm border border-white/20 relative overflow-hidden ${
                     message.senderEmail === user?.email
-                      ? `bg-gradient-to-br ${currentTheme.messageUser} text-white`
-                      : `bg-gradient-to-br ${currentTheme.messagePartner} text-white`
+                      ? `bg-gradient-to-br ${localChatTheme.messageUser} text-white`
+                      : `bg-gradient-to-br ${localChatTheme.messagePartner} text-white`
                   }`}
                   whileHover={{ scale: 1.02, y: -2 }}
                   transition={{ duration: 0.2 }}
@@ -360,21 +414,21 @@ export default function Chat({ partner, onDisconnect, onBack }: ChatProps) {
                     className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent"
                     animate={{
                       x: [-100, 100],
-                      opacity: [0, 1, 0]
+                      opacity: [0, 1, 0],
                     }}
                     transition={{
                       duration: 3,
                       repeat: Infinity,
-                      ease: "easeInOut"
+                      ease: "easeInOut",
                     }}
                   />
-                  
-                  <MessageBubble 
-                    message={message} 
+
+                  <MessageBubble
+                    message={message}
                     isOwn={message.senderEmail === user?.email}
                     onReact={(emoji) => addReaction(message.id, emoji)}
                   />
-                  
+
                   {/* Message reactions */}
                   {messageReactions[message.id] && (
                     <div className="mt-2 flex flex-wrap gap-1">
@@ -415,7 +469,7 @@ export default function Chat({ partner, onDisconnect, onBack }: ChatProps) {
             </motion.div>
           ))}
         </AnimatePresence>
-        
+
         {/* Typing indicator */}
         <AnimatePresence>
           {partnerTyping && (
@@ -435,7 +489,7 @@ export default function Chat({ partner, onDisconnect, onBack }: ChatProps) {
                       transition={{
                         duration: 0.6,
                         repeat: Infinity,
-                        delay: i * 0.2
+                        delay: i * 0.2,
                       }}
                     />
                   ))}
@@ -444,13 +498,13 @@ export default function Chat({ partner, onDisconnect, onBack }: ChatProps) {
             </motion.div>
           )}
         </AnimatePresence>
-        
+
         <div ref={messagesEndRef} />
       </div>
 
       {/* Input section */}
-      <motion.div 
-        className="relative z-10 p-4 bg-white/5 backdrop-blur-xl border-t border-white/20"
+      <motion.div
+        className={`relative z-10 p-4 ${localChatTheme.inputStyle.background} backdrop-blur-xl border-t ${localChatTheme.inputStyle.border}`}
         initial={{ y: 50, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
         transition={{ duration: 0.5, delay: 0.2 }}
@@ -465,7 +519,7 @@ export default function Chat({ partner, onDisconnect, onBack }: ChatProps) {
             >
               <Paperclip className="w-5 h-5" />
             </motion.button>
-            
+
             <motion.button
               onClick={() => setShowEmojiPicker(!showEmojiPicker)}
               className="w-12 h-12 bg-white/10 hover:bg-white/20 rounded-[1.5rem] flex items-center justify-center text-white/70 hover:text-white transition-all duration-200 backdrop-blur-sm"
@@ -475,21 +529,21 @@ export default function Chat({ partner, onDisconnect, onBack }: ChatProps) {
               <Smile className="w-5 h-5" />
             </motion.button>
           </div>
-          
+
           <div className="flex-1 relative">
             <Input
               ref={inputRef}
               value={newMessage}
               onChange={(e) => handleTyping(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
+              onKeyPress={(e) => e.key === "Enter" && handleSendMessage()}
               placeholder="Type a message..."
-              className="bg-white/10 border-white/20 text-white placeholder:text-white/60 rounded-[2rem] pr-12 h-12 backdrop-blur-sm focus:ring-2 focus:ring-white/30 transition-all duration-200"
+              className={`${localChatTheme.inputStyle.background} ${localChatTheme.inputStyle.border} ${localChatTheme.inputStyle.text} ${localChatTheme.inputStyle.placeholder} rounded-[2rem] pr-12 h-12 backdrop-blur-sm focus:ring-2 focus:ring-white/30 transition-all duration-200`}
               disabled={!isConnected}
-              style={{ fontSize: '16px' }}
+              style={{ fontSize: "16px" }}
             />
-            
+
             {isTranslationEnabled && (
-              <motion.div 
+              <motion.div
                 className="absolute right-12 top-1/2 transform -translate-y-1/2"
                 animate={{ rotate: [0, 360] }}
                 transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
@@ -498,7 +552,7 @@ export default function Chat({ partner, onDisconnect, onBack }: ChatProps) {
               </motion.div>
             )}
           </div>
-          
+
           <motion.button
             onClick={handleSendMessage}
             disabled={!newMessage.trim() || !isConnected}
@@ -538,7 +592,7 @@ export default function Chat({ partner, onDisconnect, onBack }: ChatProps) {
           >
             <EmojiPicker
               onEmojiSelect={(emoji) => {
-                setNewMessage(prev => prev + emoji);
+                setNewMessage((prev) => prev + emoji);
                 setShowEmojiPicker(false);
               }}
               onClose={() => setShowEmojiPicker(false)}
@@ -600,6 +654,12 @@ export default function Chat({ partner, onDisconnect, onBack }: ChatProps) {
           <DebugPanel onClose={() => setShowDebugPanel(false)} />
         )}
       </AnimatePresence>
+
+      {/* Theme Selector */}
+      <ThemeSelector
+        isOpen={showThemeSelector}
+        onClose={() => setShowThemeSelector(false)}
+      />
 
       {/* Security indicator */}
       <motion.div

@@ -72,6 +72,22 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         body: JSON.stringify({ email, password }),
       });
 
+      // Check if response is ok first, then parse
+      if (!response.ok) {
+        // For non-200 responses, still parse the JSON error message
+        try {
+          const errorData: AuthResponse = await response.json();
+          return errorData;
+        } catch {
+          // If JSON parsing fails, return generic error
+          return {
+            success: false,
+            message: `Server error: ${response.status} ${response.statusText}`,
+          };
+        }
+      }
+
+      // Parse successful response
       const data: AuthResponse = await response.json();
 
       if (data.success && data.user && data.token) {
@@ -100,6 +116,22 @@ export const AuthProvider: React.FC<AuthProviderProps> = ({ children }) => {
         body: JSON.stringify({ email, password }),
       });
 
+      // Check if response is ok first, then parse
+      if (!response.ok) {
+        // For non-200 responses, still parse the JSON error message
+        try {
+          const errorData: AuthResponse = await response.json();
+          return errorData;
+        } catch {
+          // If JSON parsing fails, return generic error
+          return {
+            success: false,
+            message: `Server error: ${response.status} ${response.statusText}`,
+          };
+        }
+      }
+
+      // Parse successful response
       const data: AuthResponse = await response.json();
 
       if (data.success && data.user && data.token) {

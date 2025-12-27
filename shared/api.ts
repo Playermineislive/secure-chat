@@ -80,7 +80,7 @@ export interface FileUpload {
 
 // Real-time WebSocket message types
 export interface WebSocketMessage {
-  type: 'message' | 'typing' | 'user_connected' | 'user_disconnected' | 'error';
+  type: 'message' | 'typing' | 'user_connected' | 'user_disconnected' | 'error' | 'invite_request' | 'invite_response';
   data: any;
   timestamp: string;
 }
@@ -111,6 +111,57 @@ export interface ConnectionStatus {
   partnerId?: string;
   partnerEmail?: string;
   connectionId?: string;
+}
+
+// Invite Request System
+export interface InviteRequest {
+  id: string;
+  senderId: string;
+  senderEmail: string;
+  senderUsername?: string;
+  receiverId: string;
+  code: string;
+  timestamp: string;
+  status: 'pending' | 'accepted' | 'rejected';
+  expiresAt: string;
+}
+
+export interface SendInviteRequest {
+  code: string;
+  receiverId?: string;
+  receiverEmail?: string;
+}
+
+export interface SendInviteResponse {
+  success: boolean;
+  requestId?: string;
+  message?: string;
+}
+
+export interface InviteRequestResponse {
+  requestId: string;
+  response: 'accept' | 'reject';
+}
+
+export interface InviteRequestResponseResult {
+  success: boolean;
+  message?: string;
+  contactInfo?: {
+    id: string;
+    email: string;
+    username?: string;
+  };
+}
+
+export interface InviteNotification {
+  id: string;
+  type: 'invite_request' | 'invite_accepted' | 'invite_rejected';
+  senderId: string;
+  senderEmail: string;
+  senderUsername?: string;
+  timestamp: string;
+  requestId?: string;
+  message?: string;
 }
 
 // Demo response (keep existing)

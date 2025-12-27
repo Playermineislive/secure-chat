@@ -40,8 +40,11 @@ export const handleSignup: RequestHandler = async (req, res) => {
   try {
     const { email, password }: AuthRequest = req.body;
 
+    console.log(`Signup attempt for email: ${email}`);
+
     // Validate input
     if (!email || !password) {
+      console.log("Signup failed: Missing email or password");
       const response: AuthResponse = {
         success: false,
         message: "Email and password are required",
@@ -51,6 +54,7 @@ export const handleSignup: RequestHandler = async (req, res) => {
 
     // Check if user already exists
     if (usersByEmail.has(email)) {
+      console.log(`Signup failed: User already exists for email ${email}`);
       const response: AuthResponse = {
         success: false,
         message: "User already exists with this email",
@@ -72,6 +76,9 @@ export const handleSignup: RequestHandler = async (req, res) => {
     // Store user
     users.set(user.id, user);
     usersByEmail.set(email, user);
+
+    console.log(`User successfully created: ${email} (ID: ${user.id})`);
+    console.log(`Total users now: ${usersByEmail.size}`);
 
     // Generate token
     const token = generateToken(user.id);
@@ -101,8 +108,12 @@ export const handleLogin: RequestHandler = async (req, res) => {
   try {
     const { email, password }: AuthRequest = req.body;
 
+    console.log(`Login attempt for email: ${email}`);
+    console.log(`Total registered users: ${usersByEmail.size}`);
+
     // Validate input
     if (!email || !password) {
+      console.log("Login failed: Missing email or password");
       const response: AuthResponse = {
         success: false,
         message: "Email and password are required",
@@ -113,6 +124,8 @@ export const handleLogin: RequestHandler = async (req, res) => {
     // Find user
     const user = usersByEmail.get(email);
     if (!user) {
+      console.log(`Login failed: User not found for email ${email}`);
+      console.log("Registered emails:", Array.from(usersByEmail.keys()));
       const response: AuthResponse = {
         success: false,
         message: "Invalid email or password",

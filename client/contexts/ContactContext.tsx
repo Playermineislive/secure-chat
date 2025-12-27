@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
 import { useAuth } from './AuthContext';
 import { generateSecureCode, generateInviteCode, InviteCode } from '../utils/groupCrypto';
+import { InviteRequest, InviteNotification } from '@shared/api';
 
 export interface Contact {
   id: string;
@@ -66,6 +67,8 @@ interface ContactContextType {
   contacts: Contact[];
   groups: Group[];
   pendingRequests: Contact[];
+  inviteRequests: InviteRequest[];
+  inviteNotifications: InviteNotification[];
   currentInviteCode: InviteCode | null;
   userProfile: {
     id: string;
@@ -88,6 +91,12 @@ interface ContactContextType {
   generateNewInviteCode: () => void;
   forceRefreshInviteCode: () => void; // Instant refresh button
   addFriendByCode: (code: string, userInfo: { email: string; username?: string }) => Promise<boolean>;
+  sendInviteByCode: (code: string) => Promise<boolean>;
+  acceptInviteRequest: (requestId: string) => Promise<boolean>;
+  rejectInviteRequest: (requestId: string) => Promise<boolean>;
+  addInviteRequest: (request: InviteRequest) => void;
+  addInviteNotification: (notification: InviteNotification) => void;
+  clearNotification: (notificationId: string) => void;
   searchContacts: (query: string) => Contact[];
   getFavoriteContacts: () => Contact[];
   getOnlineContacts: () => Contact[];
@@ -111,6 +120,8 @@ export const ContactProvider: React.FC<ContactProviderProps> = ({ children }) =>
   const [contacts, setContacts] = useState<Contact[]>([]);
   const [groups, setGroups] = useState<Group[]>([]);
   const [pendingRequests, setPendingRequests] = useState<Contact[]>([]);
+  const [inviteRequests, setInviteRequests] = useState<InviteRequest[]>([]);
+  const [inviteNotifications, setInviteNotifications] = useState<InviteNotification[]>([]);
   const [currentInviteCode, setCurrentInviteCode] = useState<InviteCode | null>(null);
   const [userProfile, setUserProfile] = useState<{
     id: string;
@@ -141,6 +152,8 @@ export const ContactProvider: React.FC<ContactProviderProps> = ({ children }) =>
       const savedContacts = localStorage.getItem('secureChat_contacts');
       const savedGroups = localStorage.getItem('secureChat_groups');
       const savedRequests = localStorage.getItem('secureChat_pendingRequests');
+      const savedInviteRequests = localStorage.getItem('secureChat_inviteRequests');
+      const savedInviteNotifications = localStorage.getItem('secureChat_inviteNotifications');
       const savedProfile = localStorage.getItem('secureChat_userProfile');
 
       if (savedContacts) {
@@ -151,6 +164,12 @@ export const ContactProvider: React.FC<ContactProviderProps> = ({ children }) =>
       }
       if (savedRequests) {
         setPendingRequests(JSON.parse(savedRequests));
+      }
+      if (savedInviteRequests) {
+        setInviteRequests(JSON.parse(savedInviteRequests));
+      }
+      if (savedInviteNotifications) {
+        setInviteNotifications(JSON.parse(savedInviteNotifications));
       }
       if (savedProfile && user) {
         const profile = JSON.parse(savedProfile);
@@ -170,6 +189,8 @@ export const ContactProvider: React.FC<ContactProviderProps> = ({ children }) =>
       localStorage.setItem('secureChat_contacts', JSON.stringify(contacts));
       localStorage.setItem('secureChat_groups', JSON.stringify(groups));
       localStorage.setItem('secureChat_pendingRequests', JSON.stringify(pendingRequests));
+      localStorage.setItem('secureChat_inviteRequests', JSON.stringify(inviteRequests));
+      localStorage.setItem('secureChat_inviteNotifications', JSON.stringify(inviteNotifications));
       if (userProfile) {
         localStorage.setItem('secureChat_userProfile', JSON.stringify(userProfile));
       }
@@ -181,36 +202,116 @@ export const ContactProvider: React.FC<ContactProviderProps> = ({ children }) =>
   // Save data whenever it changes
   useEffect(() => {
     saveData();
-  }, [contacts, groups, pendingRequests, userProfile]);
+  }, [contacts, groups, pendingRequests, inviteRequests, inviteNotifications, userProfile]);
 
-  const generateInitialInviteCode = () => {
+  // Polling for invite requests
+  useEffect(() => {
     if (!user) return;
-    
+
+    const pollInviteRequests = async () => {
+      try {
+        const token = localStorage.getItem('authToken');
+        if (!token) {
+          console.log('No auth token found for polling invite requests');
+          return;
+        }
+
+        console.log('Polling for invite requests...');
+        const response = await fetch('/api/invites', {
+          headers: {
+            'Authorization': `Bearer ${token}`
+          }
+        });
+
+        if (response.ok) {
+          const data = await response.json();
+          console.log('Poll response:', data);
+
+          if (data.success && data.requests) {
+            console.log(`Found ${data.requests.length} pending invite requests`);
+
+            // Convert server requests to our format
+            const notifications = data.requests.map((req: any) => ({
+              id: req.id,
+              type: 'invite_request',
+              senderId: req.senderId,
+              senderEmail: req.senderEmail,
+              senderUsername: req.senderUsername,
+              timestamp: req.timestamp,
+              message: `${req.senderEmail} wants to connect with you`,
+              requestId: req.id
+            }));
+
+            // Update notifications if there are new ones
+            setInviteNotifications(prev => {
+              const existing = new Set(prev.map(n => n.id));
+              const newNotifications = notifications.filter((n: any) => !existing.has(n.id));
+              if (newNotifications.length > 0) {
+                console.log(`Adding ${newNotifications.length} new invite notifications`);
+              }
+              return newNotifications.length > 0 ? [...prev, ...newNotifications] : prev;
+            });
+          }
+        } else {
+          console.error('Failed to poll invite requests:', response.status, response.statusText);
+        }
+      } catch (error) {
+        console.error('Failed to poll invite requests:', error);
+      }
+    };
+
+    // Poll immediately and then every 10 seconds
+    pollInviteRequests();
+    const interval = setInterval(pollInviteRequests, 10000);
+
+    return () => clearInterval(interval);
+  }, [user]);
+
+  const generateInitialInviteCode = async () => {
+    if (!user) return;
+
     const savedCode = localStorage.getItem('secureChat_inviteCode');
     const savedCodeDate = localStorage.getItem('secureChat_inviteCodeDate');
-    
+
     // Check if saved code is still valid (less than 24 hours old)
     if (savedCode && savedCodeDate) {
       const codeDate = new Date(savedCodeDate);
       const now = new Date();
       const hoursDiff = (now.getTime() - codeDate.getTime()) / (1000 * 60 * 60);
-      
+
       if (hoursDiff < 24) {
         try {
           const parsedCode = JSON.parse(savedCode);
           setCurrentInviteCode(parsedCode);
+
+          // Re-register with server in case it was restarted
+          const token = localStorage.getItem('authToken');
+          if (token) {
+            try {
+              await fetch('/api/invites/register-code', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': `Bearer ${token}`
+                },
+                body: JSON.stringify({ code: parsedCode.code })
+              });
+            } catch (error) {
+              console.error('Failed to re-register existing code:', error);
+            }
+          }
           return;
         } catch (error) {
           console.error('Invalid saved code:', error);
         }
       }
     }
-    
+
     // Generate new code if no valid saved code
-    generateNewInviteCode();
+    await generateNewInviteCode();
   };
 
-  const generateNewInviteCode = () => {
+  const generateNewInviteCode = async () => {
     if (!user) return;
 
     const newCode = generateInviteCode('friend', user.id, {
@@ -221,6 +322,24 @@ export const ContactProvider: React.FC<ContactProviderProps> = ({ children }) =>
     setCurrentInviteCode(newCode);
     localStorage.setItem('secureChat_inviteCode', JSON.stringify(newCode));
     localStorage.setItem('secureChat_inviteCodeDate', new Date().toISOString());
+
+    // Register the code with the server
+    try {
+      const token = localStorage.getItem('authToken');
+      if (token) {
+        await fetch('/api/invites/register-code', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${token}`
+          },
+          body: JSON.stringify({ code: newCode.code })
+        });
+        console.log('Invite code registered with server:', newCode.code);
+      }
+    } catch (error) {
+      console.error('Failed to register invite code with server:', error);
+    }
   };
 
   const forceRefreshInviteCode = () => {
@@ -592,10 +711,228 @@ export const ContactProvider: React.FC<ContactProviderProps> = ({ children }) =>
     }
   };
 
+  const sendInviteByCode = async (code: string): Promise<boolean> => {
+    try {
+      setIsLoading(true);
+      setError(null);
+
+      // Validate code format
+      if (!/^[A-Z0-9]{6,12}$/.test(code)) {
+        setError('Invalid code format');
+        return false;
+      }
+
+      // Check if user has valid auth token
+      const token = localStorage.getItem('authToken');
+      if (!token) {
+        setError('Please log in to send invite requests');
+        return false;
+      }
+
+      // Send invite request to server
+      const response = await fetch('/api/invites/send', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ code })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        // Add notification that request was sent
+        const notification: InviteNotification = {
+          id: `notification_${Date.now()}`,
+          type: 'invite_request',
+          senderId: user?.id || '',
+          senderEmail: user?.email || '',
+          senderUsername: userProfile?.username,
+          timestamp: new Date().toISOString(),
+          message: 'Invite request sent! Waiting for response...'
+        };
+
+        addInviteNotification(notification);
+        return true;
+      } else {
+        setError(result.message || 'Failed to send invite request');
+        return false;
+      }
+    } catch (error) {
+      console.error('Failed to send invite request:', error);
+      setError('Failed to send invite request. Please try again.');
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const acceptInviteRequest = async (requestId: string): Promise<boolean> => {
+    try {
+      setIsLoading(true);
+      setError(null);
+
+      const request = inviteRequests.find(r => r.id === requestId);
+      if (!request) {
+        setError('Invite request not found');
+        return false;
+      }
+
+      // Check if user has valid auth token
+      const token = localStorage.getItem('authToken');
+      if (!token) {
+        setError('Please log in to respond to invite requests');
+        return false;
+      }
+
+      // Send response to server
+      const response = await fetch('/api/invites/respond', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ requestId, response: 'accept' })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        // Remove request from pending
+        setInviteRequests(prev => prev.filter(r => r.id !== requestId));
+
+        // Add contact if contact info provided
+        if (result.contactInfo) {
+          const newContact: Contact = {
+            id: result.contactInfo.id,
+            email: result.contactInfo.email,
+            username: result.contactInfo.username || result.contactInfo.email.split('@')[0],
+            isOnline: true,
+            status: 'online',
+            connectionDate: new Date().toISOString(),
+            unreadCount: 0,
+            isFavorite: false,
+            isPinned: false,
+            tags: ['new']
+          };
+
+          addContact(newContact);
+        }
+
+        // Add success notification
+        const notification: InviteNotification = {
+          id: `notification_${Date.now()}`,
+          type: 'invite_accepted',
+          senderId: request.senderId,
+          senderEmail: request.senderEmail,
+          senderUsername: request.senderUsername,
+          timestamp: new Date().toISOString(),
+          message: `You are now connected with ${request.senderUsername || request.senderEmail}!`
+        };
+
+        addInviteNotification(notification);
+        return true;
+      } else {
+        setError(result.message || 'Failed to accept invite request');
+        return false;
+      }
+    } catch (error) {
+      console.error('Failed to accept invite request:', error);
+      setError('Failed to accept invite request. Please try again.');
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const rejectInviteRequest = async (requestId: string): Promise<boolean> => {
+    try {
+      setIsLoading(true);
+      setError(null);
+
+      const request = inviteRequests.find(r => r.id === requestId);
+      if (!request) {
+        setError('Invite request not found');
+        return false;
+      }
+
+      // Check if user has valid auth token
+      const token = localStorage.getItem('authToken');
+      if (!token) {
+        setError('Please log in to respond to invite requests');
+        return false;
+      }
+
+      // Send response to server
+      const response = await fetch('/api/invites/respond', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ requestId, response: 'reject' })
+      });
+
+      const result = await response.json();
+
+      if (result.success) {
+        // Remove request from pending
+        setInviteRequests(prev => prev.filter(r => r.id !== requestId));
+
+        // Add rejection notification
+        const notification: InviteNotification = {
+          id: `notification_${Date.now()}`,
+          type: 'invite_rejected',
+          senderId: request.senderId,
+          senderEmail: request.senderEmail,
+          senderUsername: request.senderUsername,
+          timestamp: new Date().toISOString(),
+          message: `Declined invite request from ${request.senderUsername || request.senderEmail}`
+        };
+
+        addInviteNotification(notification);
+        return true;
+      } else {
+        setError(result.message || 'Failed to reject invite request');
+        return false;
+      }
+    } catch (error) {
+      console.error('Failed to reject invite request:', error);
+      setError('Failed to reject invite request. Please try again.');
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const addInviteRequest = (request: InviteRequest) => {
+    setInviteRequests(prev => {
+      const exists = prev.find(r => r.id === request.id);
+      if (exists) return prev;
+      return [...prev, request];
+    });
+  };
+
+  const addInviteNotification = (notification: InviteNotification) => {
+    setInviteNotifications(prev => [...prev, notification]);
+
+    // Auto-remove notification after 10 seconds
+    setTimeout(() => {
+      clearNotification(notification.id);
+    }, 10000);
+  };
+
+  const clearNotification = (notificationId: string) => {
+    setInviteNotifications(prev => prev.filter(n => n.id !== notificationId));
+  };
+
   const value: ContactContextType = {
     contacts,
     groups,
     pendingRequests,
+    inviteRequests,
+    inviteNotifications,
     currentInviteCode,
     userProfile,
     addContact,
@@ -613,6 +950,12 @@ export const ContactProvider: React.FC<ContactProviderProps> = ({ children }) =>
     generateNewInviteCode,
     forceRefreshInviteCode,
     addFriendByCode,
+    sendInviteByCode,
+    acceptInviteRequest,
+    rejectInviteRequest,
+    addInviteRequest,
+    addInviteNotification,
+    clearNotification,
     searchContacts,
     getFavoriteContacts,
     getOnlineContacts,
