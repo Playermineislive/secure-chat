@@ -2,9 +2,10 @@
 @tailwind components;
 @tailwind utilities;
 
+/* --- BASE LAYER: Core Variables & Resets --- */
 @layer base {
   :root {
-    /* --- Core Palette (HSL for Opacity Support) --- */
+    /* Core Palette */
     --background: 220 25% 97%;
     --foreground: 225 15% 10%;
 
@@ -14,7 +15,7 @@
     --popover: 0 0% 100%;
     --popover-foreground: 225 15% 10%;
 
-    /* Brand Color: Deep Violet/Indigo */
+    /* Brand: Deep Violet/Indigo */
     --primary: 262 80% 55%;
     --primary-foreground: 0 0% 100%;
 
@@ -36,12 +37,14 @@
 
     --radius: 1rem;
 
-    /* --- Chat Specific --- */
+    /* Chat Specific Colors */
     --chat-bubble-user: 262 80% 55%;
     --chat-bubble-user-text: 0 0% 100%;
-    
     --chat-bubble-peer: 220 20% 94%;
     --chat-bubble-peer-text: 225 15% 10%;
+    
+    /* gradients */
+    --gradient-primary: linear-gradient(135deg, hsl(262 80% 60%) 0%, hsl(280 70% 65%) 100%);
   }
 
   .dark {
@@ -54,7 +57,6 @@
     --popover: 224 25% 8%;
     --popover-foreground: 210 20% 98%;
 
-    /* Brand Color in Dark Mode (Slightly Lighter for Contrast) */
     --primary: 263 75% 65%;
     --primary-foreground: 0 0% 100%;
 
@@ -73,11 +75,10 @@
     --border: 217 20% 15%;
     --input: 217 20% 15%;
     --ring: 263 75% 65%;
-    
-    /* --- Chat Specific (Dark) --- */
+
+    /* Chat Specific (Dark) */
     --chat-bubble-user: 263 75% 65%;
     --chat-bubble-user-text: 0 0% 100%;
-    
     --chat-bubble-peer: 217 20% 15%;
     --chat-bubble-peer-text: 210 20% 98%;
   }
@@ -86,7 +87,6 @@
     @apply border-border;
   }
 
-  /* Core Layout Setup */
   html {
     -webkit-tap-highlight-color: transparent;
     scroll-behavior: smooth;
@@ -95,66 +95,68 @@
   body {
     @apply bg-background text-foreground antialiased;
     font-feature-settings: "rlig" 1, "calt" 1;
-    /* Prevent pull-to-refresh on mobile (optional, feels more native) */
-    overscroll-behavior-y: none; 
+    overscroll-behavior-y: none; /* iOS Native feel */
+    background-image: radial-gradient(circle at 50% 0%, hsla(var(--primary) / 0.1) 0%, transparent 60%);
+    background-attachment: fixed;
   }
 
-  /* Better Heading Rendering */
-  h1, h2, h3, h4, h5, h6 {
+  /* Hardware Acceleration for smoother animations */
+  .gpu-accelerated {
+    transform: translateZ(0);
+    backface-visibility: hidden;
+    perspective: 1000px;
+  }
+
+  /* Better Typography */
+  h1, h2, h3, h4 {
     text-wrap: balance;
-  }
-
-  /* Custom Selection Color */
-  ::selection {
-    @apply bg-primary/20 text-foreground;
   }
 }
 
+/* --- COMPONENTS LAYER: UI Elements --- */
 @layer components {
-  /* --- Glassmorphism --- */
+  /* 1. Enhanced Glassmorphism */
   .glass {
-    @apply bg-white/70 dark:bg-black/40 border border-white/20 dark:border-white/10 backdrop-blur-xl shadow-sm;
+    @apply bg-white/70 dark:bg-black/40 border border-white/20 dark:border-white/10 backdrop-blur-xl shadow-sm transition-all duration-300;
+  }
+  
+  .glass:hover {
+    @apply bg-white/80 dark:bg-black/50 shadow-md;
+    transform: translateY(-2px);
   }
 
   .glass-panel {
     @apply bg-background/80 backdrop-blur-md border border-border shadow-lg;
   }
 
-  /* --- Scrollbar Customization --- */
-  /* Firefox */
+  /* 2. Scrollbars (Custom & Sleek) */
   .custom-scrollbar {
     scrollbar-width: thin;
     scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
   }
-
-  /* Webkit (Chrome/Safari/Edge) */
+  
   .custom-scrollbar::-webkit-scrollbar {
     width: 6px;
     height: 6px;
   }
-
+  
   .custom-scrollbar::-webkit-scrollbar-track {
     background: transparent;
   }
-
+  
   .custom-scrollbar::-webkit-scrollbar-thumb {
     @apply bg-muted-foreground/30 rounded-full hover:bg-muted-foreground/50 transition-colors;
   }
-  
-  /* Hide scrollbar but keep functionality */
-  .no-scrollbar::-webkit-scrollbar {
-    display: none;
-  }
-  .no-scrollbar {
-    -ms-overflow-style: none;
-    scrollbar-width: none;
-  }
 
-  /* --- Chat Bubbles --- */
+  .no-scrollbar::-webkit-scrollbar { display: none; }
+  .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+  /* 3. Chat Bubbles & Interactions */
   .bubble-user {
     background-color: hsl(var(--chat-bubble-user));
     color: hsl(var(--chat-bubble-user-text));
     border-bottom-right-radius: 4px;
+    box-shadow: 0 2px 8px hsla(var(--chat-bubble-user) / 0.2);
   }
 
   .bubble-peer {
@@ -162,70 +164,142 @@
     color: hsl(var(--chat-bubble-peer-text));
     border-bottom-left-radius: 4px;
   }
+
+  .message-bubble {
+    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  }
+  
+  .message-bubble:hover {
+    transform: translateY(-1px);
+    filter: brightness(1.02);
+  }
+
+  /* 4. Inputs & Focus */
+  .focus-ring {
+    @apply transition-shadow duration-200;
+  }
+  
+  .focus-ring:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px hsl(var(--background)), 0 0 0 4px hsl(var(--ring));
+  }
+
+  /* 5. Gradients & Effects */
+  .gradient-primary {
+    background: var(--gradient-primary);
+  }
+  
+  .gradient-text {
+    background: var(--gradient-primary);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+  }
 }
 
+/* --- UTILITIES LAYER: Animations & Performance --- */
 @layer utilities {
-  /* --- Mobile Safe Areas (iPhone Home Bar Fix) --- */
-  .pb-safe {
-    padding-bottom: env(safe-area-inset-bottom);
+  /* Mobile Safe Areas */
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom); }
+  .pt-safe { padding-top: env(safe-area-inset-top); }
+  .h-safe-screen { height: 100dvh; }
+
+  /* Performance Helpers */
+  .contain-content { contain: content; }
+  .will-change-transform { will-change: transform; }
+
+  /* --- Keyframe Animations (Restored) --- */
+
+  /* 1. Message Appearance */
+  @keyframes messageAppear {
+    0% { opacity: 0; transform: translateY(10px) scale(0.98); }
+    100% { opacity: 1; transform: translateY(0) scale(1); }
   }
-  
-  .pt-safe {
-    padding-top: env(safe-area-inset-top);
-  }
-  
-  .h-safe-screen {
-    height: 100vh; /* Fallback */
-    height: 100dvh; /* Dynamic Viewport Height (Mobile Friendly) */
+  .animate-message-appear {
+    animation: messageAppear 0.3s cubic-bezier(0.2, 0.9, 0.3, 1) forwards;
   }
 
-  /* --- Performance Optimizations --- */
-  
-  /* Use on long chat lists to prevent rendering off-screen items */
-  .contain-content {
-    contain: content; 
+  /* 2. Fade In Up (General UI) */
+  @keyframes fadeInUp {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  .animate-fade-in-up {
+    animation: fadeInUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   }
 
-  /* Use on elements that animate (like slide-overs) */
-  .gpu-layer {
-    transform: translateZ(0);
-    will-change: transform, opacity;
-    backface-visibility: hidden;
+  /* 3. Floating (Decorative) */
+  @keyframes float {
+    0%, 100% { transform: translateY(0px); }
+    50% { transform: translateY(-10px); }
+  }
+  .animate-float {
+    animation: float 6s ease-in-out infinite;
+  }
+  .animate-float-delayed {
+    animation: float 6s ease-in-out infinite 2s;
   }
 
-  /* --- Animations --- */
-  .animate-in-up {
-    animation: fadeInUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  /* 4. Pulse / Typing Indicator */
+  @keyframes pulse-soft {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.7; transform: scale(0.95); }
   }
-  
-  .animate-in-scale {
-    animation: scaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+  .animate-pulse-soft {
+    animation: pulse-soft 2s cubic-bezier(0.4, 0, 0.6, 1) infinite;
   }
+
+  /* 5. Shimmer (Loading States) */
+  @keyframes shimmer {
+    0% { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+  }
+  .animate-shimmer {
+    background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+    background-size: 200% 100%;
+    animation: shimmer 2s infinite linear;
+  }
+
+  /* 6. Sparkle (Success/Highlight) */
+  @keyframes sparkle {
+    0%, 100% { opacity: 0; transform: scale(0) rotate(0deg); }
+    50% { opacity: 1; transform: scale(1) rotate(180deg); }
+  }
+  .animate-sparkle {
+    animation: sparkle 1.5s ease-in-out infinite;
+  }
+
+  /* 7. Breathing (Subtle BG movement) */
+  @keyframes breathe {
+    0%, 100% { transform: scale(1); }
+    50% { transform: scale(1.02); }
+  }
+  .animate-breathe {
+    animation: breathe 4s ease-in-out infinite;
+  }
+
+  /* --- Glow Effects (Restored) --- */
+  .glow-sm { box-shadow: 0 0 15px hsla(var(--primary) / 0.3); }
+  .glow-md { box-shadow: 0 0 30px hsla(var(--primary) / 0.4); }
+  .glow-lg { box-shadow: 0 0 50px hsla(var(--primary) / 0.5); }
   
-  /* Staggered delays */
+  .hover-glow { transition: box-shadow 0.3s ease; }
+  .hover-glow:hover { box-shadow: 0 0 25px hsla(var(--primary) / 0.4); }
+
+  /* Animation Delays */
+  .delay-75 { animation-delay: 75ms; }
   .delay-100 { animation-delay: 100ms; }
+  .delay-150 { animation-delay: 150ms; }
   .delay-200 { animation-delay: 200ms; }
   .delay-300 { animation-delay: 300ms; }
+}
 
-  @keyframes fadeInUp {
-    from {
-      opacity: 0;
-      transform: translateY(10px);
-    }
-    to {
-      opacity: 1;
-      transform: translateY(0);
-    }
-  }
-
-  @keyframes scaleIn {
-    from {
-      opacity: 0;
-      transform: scale(0.96);
-    }
-    to {
-      opacity: 1;
-      transform: scale(1);
-    }
+/* Reduced Motion Support */
+@media (prefers-reduced-motion: reduce) {
+  *, ::before, ::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }
