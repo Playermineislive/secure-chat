@@ -1,30 +1,132 @@
-import React, { createContext, useContext, useEffect, useState, ReactNode } from 'react';
+import React, { createContext, useContext, useEffect, useReducer, useCallback, useRef, useMemo, ReactNode } from 'react';
 import { io, Socket } from 'socket.io-client';
 import { useAuth } from './AuthContext';
 import { useEncryption } from './EncryptionContext';
 import { WebSocketMessage, ChatMessage, MediaContent } from '@shared/api';
-import { EncryptedMessage, EncryptedFile, isValidEncryptedMessage, isValidEncryptedFile, cleanEncryptedMessage } from '../utils/crypto';
+import { cleanEncryptedMessage, decryptFromPartner, isValidEncryptedFile, decryptFileFromPartner, EncryptedMessage } from '../utils/crypto';
 
-interface SocketContextType {
-  socket: Socket | null;
+// --- Domain Models ---
+
+export type ConnectionState = 'disconnected' | 'connecting' | 'connected' | 'reconnecting' | 'unstable';
+
+export type MessageStatus = 'pending' | 'sent' | 'delivered' | 'failed';
+
+export interface EnhancedChatMessage extends ChatMessage {
+  status: MessageStatus;
+  localId?: string; // For tracking optimistic updates
+  retryCount?: number;
+}
+
+interface SocketState {
   isConnected: boolean;
-  messages: ChatMessage[];
-  sendMessage: (content: string, type?: string) => void;
-  sendFile: (file: File) => Promise<void>;
-  sendTyping: (isTyping: boolean) => void;
+  connectionState: ConnectionState;
+  messages: EnhancedChatMessage[];
   partnerTyping: boolean;
   partnerOnline: boolean;
-  clearMessages: () => void;
   keyExchangeComplete: boolean;
+  unsentQueue: Array<{ id: string; payload: any; type: string; timestamp: number }>;
+}
+
+// --- Actions ---
+
+type Action =
+  | { type: 'SET_CONNECTION_STATE'; payload: ConnectionState }
+  | { type: 'SET_PARTNER_STATUS'; payload: { online?: boolean; typing?: boolean } }
+  | { type: 'SET_KEY_EXCHANGE'; payload: boolean }
+  | { type: 'ADD_MESSAGE'; payload: EnhancedChatMessage }
+  | { type: 'UPDATE_MESSAGE_STATUS'; payload: { id: string; status: MessageStatus } }
+  | { type: 'QUEUE_MESSAGE'; payload: { id: string; payload: any; type: string } }
+  | { type: 'REMOVE_FROM_QUEUE'; payload: string }
+  | { type: 'LOAD_QUEUE'; payload: any[] }
+  | { type: 'CLEAR_MESSAGES' };
+
+// --- Initial State ---
+
+const initialState: SocketState = {
+  isConnected: false,
+  connectionState: 'disconnected',
+  messages: [],
+  partnerTyping: false,
+  partnerOnline: false,
+  keyExchangeComplete: false,
+  unsentQueue: [],
+};
+
+// --- Reducer ---
+
+function socketReducer(state: SocketState, action: Action): SocketState {
+  switch (action.type) {
+    case 'SET_CONNECTION_STATE':
+      return { 
+        ...state, 
+        connectionState: action.payload,
+        isConnected: action.payload === 'connected' 
+      };
+
+    case 'SET_PARTNER_STATUS':
+      return { 
+        ...state, 
+        partnerOnline: action.payload.online ?? state.partnerOnline,
+        partnerTyping: action.payload.typing ?? state.partnerTyping
+      };
+
+    case 'SET_KEY_EXCHANGE':
+      return { ...state, keyExchangeComplete: action.payload };
+
+    case 'ADD_MESSAGE':
+      // Deduplication: Check if message ID already exists
+      if (state.messages.some(m => m.id === action.payload.id)) return state;
+      return { ...state, messages: [...state.messages, action.payload] };
+
+    case 'UPDATE_MESSAGE_STATUS':
+      return {
+        ...state,
+        messages: state.messages.map(msg => 
+          msg.id === action.payload.id || msg.localId === action.payload.id 
+            ? { ...msg, status: action.payload.status } 
+            : msg
+        )
+      };
+
+    case 'QUEUE_MESSAGE':
+      const newQueue = [...state.unsentQueue, { ...action.payload, timestamp: Date.now() }];
+      // Persist to storage
+      localStorage.setItem('secureChat_unsentQueue', JSON.stringify(newQueue));
+      return { ...state, unsentQueue: newQueue };
+
+    case 'REMOVE_FROM_QUEUE': {
+      const filteredQueue = state.unsentQueue.filter(item => item.id !== action.payload);
+      localStorage.setItem('secureChat_unsentQueue', JSON.stringify(filteredQueue));
+      return { ...state, unsentQueue: filteredQueue };
+    }
+
+    case 'LOAD_QUEUE':
+      return { ...state, unsentQueue: action.payload };
+
+    case 'CLEAR_MESSAGES':
+      return { ...state, messages: [] };
+
+    default:
+      return state;
+  }
+}
+
+// --- Context ---
+
+interface SocketContextType extends SocketState {
+  socket: Socket | null;
+  sendMessage: (content: string, type?: string) => Promise<void>;
+  sendFile: (file: File) => Promise<void>;
+  sendTyping: (isTyping: boolean) => void;
+  clearMessages: () => void;
+  retryMessage: (localId: string) => void;
 }
 
 const SocketContext = createContext<SocketContextType | undefined>(undefined);
 
-interface SocketProviderProps {
-  children: ReactNode;
-}
+// --- Provider ---
 
-export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
+export const SocketProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { token, isAuthenticated, user } = useAuth();
   const {
     keyPair,
@@ -37,375 +139,289 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
     generateKeys,
     isKeysGenerated
   } = useEncryption();
-  
-  const [socket, setSocket] = useState<Socket | null>(null);
-  const [isConnected, setIsConnected] = useState(false);
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
-  const [partnerTyping, setPartnerTyping] = useState(false);
-  const [partnerOnline, setPartnerOnline] = useState(false);
-  const [keyExchangeComplete, setKeyExchangeComplete] = useState(false);
 
-  // Generate keys when socket provider initializes
+  const [state, dispatch] = useReducer(socketReducer, initialState);
+  const socketRef = useRef<Socket | null>(null);
+  
+  // Keep refs for event listeners to avoid stale closures
+  const stateRef = useRef(state);
+  useEffect(() => { stateRef.current = state; }, [state]);
+
+  // --- Initialization & Lifecycle ---
+
+  // 1. Load persisted queue on mount
   useEffect(() => {
-    if (isAuthenticated && !isKeysGenerated) {
-      generateKeys();
+    try {
+      const savedQueue = localStorage.getItem('secureChat_unsentQueue');
+      if (savedQueue) {
+        dispatch({ type: 'LOAD_QUEUE', payload: JSON.parse(savedQueue) });
+      }
+    } catch (e) {
+      console.error('Failed to load message queue', e);
     }
+  }, []);
+
+  // 2. Ensure Encryption Keys
+  useEffect(() => {
+    if (isAuthenticated && !isKeysGenerated) generateKeys();
   }, [isAuthenticated, isKeysGenerated, generateKeys]);
 
-  // Check if key exchange is complete
+  // 3. Track Key Exchange
   useEffect(() => {
-    setKeyExchangeComplete(!!(keyPair && partnerPublicKey && sharedKey));
-  }, [keyPair, partnerPublicKey, sharedKey]);
-
-  useEffect(() => {
-    if (isAuthenticated && token && !socket && isKeysGenerated) {
-      console.log('Initializing Socket.IO connection...');
-      const newSocket = io('/', {
-        auth: {
-          token,
-        },
-        transports: ['polling', 'websocket'], // Fallback to polling if websocket fails
-        upgrade: true,
-        rememberUpgrade: true,
-        timeout: 5000, // 5 second timeout
-        forceNew: true, // Force new connection
-      });
-
-      newSocket.on('connect', () => {
-        console.log('✅ Connected to chat server');
-        setIsConnected(true);
-        clearTimeout(connectionTimeout);
-
-        // Send user info to server
-        if (user) {
-          newSocket.emit('user_join', {
-            userId: user.id,
-            userEmail: user.email
-          });
-        }
-
-        // Send public key for key exchange
-        if (keyPair?.publicKey) {
-          console.log('📤 Sending public key for key exchange');
-          newSocket.emit('key_exchange', {
-            publicKey: keyPair.publicKey
-          });
-        }
-      });
-
-      // Set up connection timeout fallback
-      const connectionTimeout = setTimeout(() => {
-        if (!newSocket.connected) {
-          console.log('⚠️ Socket connection timeout, enabling fallback mode');
-          setIsConnected(true); // Allow chat to work without real-time features
-          setPartnerOnline(true); // Assume partner is online for better UX
-          console.log('📝 Fallback mode: Messages will be stored locally only');
-        }
-      }, 5000); // Increased timeout to 5 seconds
-
-      newSocket.on('disconnect', () => {
-        console.log('Disconnected from chat server');
-        setIsConnected(false);
-        setPartnerOnline(false);
-      });
-
-      // Handle key exchange
-      newSocket.on('key_exchange', (data: { publicKey: string; userId: string }) => {
-        console.log('📜 Received partner public key for key exchange from:', data.userId);
-        console.log('📜 Public key length:', data.publicKey?.length);
-        if (data.publicKey && data.publicKey.length > 0) {
-          setPartnerPublicKey(data.publicKey);
-          console.log('✅ Partner public key set successfully');
-        } else {
-          console.error('❌ Invalid public key received');
-        }
-      });
-
-      newSocket.on('message', async (wsMessage: WebSocketMessage) => {
-        console.log('Received message:', wsMessage);
-        
-        switch (wsMessage.type) {
-          case 'message':
-            console.log('📨 Received message:', wsMessage.data);
-            console.log('👤 Current user ID:', user?.id);
-            console.log('📤 Message sender ID:', wsMessage.data.senderId);
-
-            // Don't add messages from the current user to avoid duplicates
-            if (wsMessage.data.senderId === user?.id) {
-              console.log('❌ Ignoring echo message from self');
-              break;
-            }
-
-            console.log('✅ Adding partner message to chat');
-
-            let content = wsMessage.data.content;
-            console.log('📦 Message content type:', typeof content);
-            console.log('📦 Message content:', content);
-            console.log('🔐 Key exchange complete:', keyExchangeComplete);
-
-            // Handle encrypted/plain text messages and media
-            console.log('📦 Processing received message...', { type: wsMessage.data.type });
-            console.log('📦 Content type:', typeof content, 'Content:', content);
-
-            // Check if this is a text/emoji message and handle encryption/plain text
-            if (wsMessage.data.type === 'text' || wsMessage.data.type === 'emoji') {
-              if (typeof content === 'object' && content !== null) {
-                console.log('🔐 Received object content, checking if encrypted...');
-
-                // Try to clean and validate the encrypted message
-                const cleanedEncrypted = cleanEncryptedMessage(content);
-                if (cleanedEncrypted) {
-                  console.log('🔓 Valid encrypted message detected, attempting decryption...');
-
-                  const decryptedContent = decryptFromPartner(cleanedEncrypted);
-                  if (decryptedContent && decryptedContent.length > 0) {
-                    console.log('✅ Successfully decrypted text message, length:', decryptedContent.length);
-                    content = decryptedContent;
-                  } else {
-                    console.warn('⚠️ Decryption returned empty/null content');
-                    content = '🔒 [Encrypted message - unable to decrypt]';
-                  }
-                } else {
-                  // Not a valid encrypted message, try to handle as plain object
-                  console.log('📝 Object is not encrypted, converting to string...');
-                  try {
-                    content = JSON.stringify(content);
-                    console.log('📝 Converted object to JSON string');
-                  } catch {
-                    content = String(content);
-                    console.log('📝 Converted object to string');
-                  }
-                }
-              } else if (typeof content === 'string') {
-                console.log('📝 Received plain text message, length:', content.length);
-                // Content is already plain text, no decryption needed
-              } else {
-                console.warn('⚠️ Unexpected content format for text message:', typeof content, content);
-                content = String(content);
-                console.log('📝 Converted to string as fallback');
-              }
-            } else if (wsMessage.data.type && ['image', 'video', 'file'].includes(wsMessage.data.type)) {
-              console.log('📁 Processing media message...');
-              try {
-                // Parse media content
-                const mediaContent: MediaContent = typeof content === 'string'
-                  ? JSON.parse(content)
-                  : content;
-
-                // Check if the media data is encrypted
-                if (typeof mediaContent.data === 'string' && mediaContent.data.startsWith('{')) {
-                  try {
-                    const encryptedFile = JSON.parse(mediaContent.data);
-                    if (isValidEncryptedFile(encryptedFile)) {
-                      console.log('🔓 Attempting to decrypt file...');
-                      const decryptedUrl = await decryptFileFromPartner(encryptedFile);
-                      if (decryptedUrl) {
-                        mediaContent.data = decryptedUrl;
-                        console.log('✅ Successfully decrypted file');
-                      } else {
-                        console.error('❌ Failed to decrypt file');
-                        mediaContent.data = '#'; // Placeholder
-                      }
-                    }
-                  } catch (parseError) {
-                    console.log('📝 Media data is not encrypted JSON');
-                  }
-                }
-
-                content = mediaContent;
-              } catch (error) {
-                console.error('❌ Media processing error:', error);
-                content = '[Failed to process media]';
-              }
-            } else {
-              console.log('📝 Message is plain text or emoji');
-              if (typeof content !== 'string') {
-                console.warn('⚠️ Non-string content received, converting:', content);
-                content = String(content);
-              }
-            }
-
-            const chatMessage: ChatMessage = {
-              id: `${wsMessage.data.senderId}-${wsMessage.timestamp}`,
-              senderId: wsMessage.data.senderId,
-              content: content as string,
-              timestamp: wsMessage.data.timestamp,
-              type: wsMessage.data.type,
-            };
-            setMessages(prev => [...prev, chatMessage]);
-            break;
-            
-          case 'typing':
-            setPartnerTyping(wsMessage.data.isTyping);
-            // Clear typing indicator after 3 seconds if no update
-            if (wsMessage.data.isTyping) {
-              setTimeout(() => setPartnerTyping(false), 3000);
-            }
-            break;
-            
-          case 'user_connected':
-            setPartnerOnline(true);
-            // Request key exchange when partner connects
-            if (keyPair?.publicKey) {
-              newSocket.emit('key_exchange', { 
-                publicKey: keyPair.publicKey 
-              });
-            }
-            break;
-            
-          case 'user_disconnected':
-            setPartnerOnline(false);
-            setPartnerTyping(false);
-            break;
-            
-          case 'error':
-            console.error('WebSocket error:', wsMessage.data);
-            break;
-        }
-      });
-
-      newSocket.on('message_sent', (data: { success: boolean }) => {
-        if (data.success) {
-          console.log('Message sent successfully');
-        }
-      });
-
-      newSocket.on('connect_error', (error: any) => {
-        console.error('❌ Socket connection error:', error);
-      });
-
-      newSocket.on('error', (error: any) => {
-        console.error('❌ Socket error:', error);
-      });
-
-      setSocket(newSocket);
+    const isComplete = !!(keyPair && partnerPublicKey && sharedKey);
+    if (isComplete !== state.keyExchangeComplete) {
+      dispatch({ type: 'SET_KEY_EXCHANGE', payload: isComplete });
     }
+  }, [keyPair, partnerPublicKey, sharedKey, state.keyExchangeComplete]);
+
+  // --- Socket Logic ---
+
+  useEffect(() => {
+    if (!isAuthenticated || !token || !isKeysGenerated) return;
+    if (socketRef.current) return;
+
+    dispatch({ type: 'SET_CONNECTION_STATE', payload: 'connecting' });
+
+    const socket = io('/', {
+      auth: { token },
+      transports: ['websocket', 'polling'],
+      reconnection: true,
+      reconnectionAttempts: Infinity,
+      reconnectionDelay: 1000,
+      reconnectionDelayMax: 5000,
+      timeout: 20000,
+    });
+
+    socketRef.current = socket;
+
+    // --- Connection Events ---
+
+    socket.on('connect', () => {
+      console.log('✅ Socket connected');
+      dispatch({ type: 'SET_CONNECTION_STATE', payload: 'connected' });
+      
+      // Handshake
+      if (user) socket.emit('user_join', { userId: user.id, userEmail: user.email });
+      if (keyPair?.publicKey) socket.emit('key_exchange', { publicKey: keyPair.publicKey });
+
+      // Flush Queue
+      flushQueue(socket);
+    });
+
+    socket.on('disconnect', (reason) => {
+      console.warn('❌ Socket disconnected:', reason);
+      dispatch({ type: 'SET_CONNECTION_STATE', payload: 'disconnected' });
+      dispatch({ type: 'SET_PARTNER_STATUS', payload: { online: false, typing: false } });
+    });
+
+    socket.on('connect_error', (err) => {
+      console.error('⚠️ Connection error:', err);
+      dispatch({ type: 'SET_CONNECTION_STATE', payload: 'reconnecting' });
+    });
+
+    // --- Chat Events ---
+
+    socket.on('key_exchange', (data: { publicKey: string }) => {
+      if (data.publicKey) setPartnerPublicKey(data.publicKey);
+    });
+
+    socket.on('user_connected', () => {
+      dispatch({ type: 'SET_PARTNER_STATUS', payload: { online: true } });
+      // Re-send key to ensure they have it
+      if (keyPair?.publicKey) socket.emit('key_exchange', { publicKey: keyPair.publicKey });
+    });
+
+    socket.on('user_disconnected', () => {
+      dispatch({ type: 'SET_PARTNER_STATUS', payload: { online: false, typing: false } });
+    });
+
+    socket.on('typing', (data: { isTyping: boolean }) => {
+      dispatch({ type: 'SET_PARTNER_STATUS', payload: { typing: data.isTyping } });
+    });
+
+    socket.on('message_ack', (data: { id: string }) => {
+      dispatch({ type: 'UPDATE_MESSAGE_STATUS', payload: { id: data.id, status: 'delivered' } });
+    });
+
+    socket.on('message', async (wsMessage: WebSocketMessage) => {
+      await handleIncomingMessage(wsMessage);
+    });
 
     return () => {
-      if (socket) {
-        socket.disconnect();
-        setSocket(null);
-        setIsConnected(false);
-      }
-      clearTimeout(connectionTimeout);
+      socket.disconnect();
+      socketRef.current = null;
     };
   }, [isAuthenticated, token, isKeysGenerated, keyPair]);
 
-  const sendMessage = (content: string, type: string = 'text') => {
-    console.log('📤 Attempting to send message:', { content, type, isConnected });
+  // --- Helper Functions ---
 
-    if (!content.trim()) {
-      console.warn('⚠️ Empty message content, not sending');
-      return;
-    }
+  const flushQueue = useCallback((activeSocket: Socket) => {
+    const queue = JSON.parse(localStorage.getItem('secureChat_unsentQueue') || '[]');
+    if (queue.length === 0) return;
 
-    // Always add message to local state immediately for better UX
-    const localMessage: ChatMessage = {
-      id: `${user?.id}-${Date.now()}`,
-      senderId: user?.id || '',
-      content: content, // Always show original content locally
-      timestamp: new Date().toISOString(),
-      type: type as any,
-    };
-    setMessages(prev => [...prev, localMessage]);
-
-    if (isConnected || !socket) { // Allow fallback mode
-      let messageContent: string | EncryptedMessage = content;
-
-      // Encrypt message if keys are available and it's a text/emoji message
-      console.log('🔐 Key exchange complete:', keyExchangeComplete);
-      console.log('🔑 Available keys:', { hasKeyPair: !!keyPair, hasPartnerKey: !!partnerPublicKey, hasSharedKey: !!sharedKey });
-
-      if (keyExchangeComplete && sharedKey && (type === 'text' || type === 'emoji')) {
-        console.log('🔒 Encryption available - encrypting text/emoji message...');
-        try {
-          const encrypted = encryptForPartner(content);
-          if (encrypted) {
-            console.log('✅ Message encrypted successfully');
-            messageContent = encrypted;
-          } else {
-            console.warn('⚠️ Encryption failed, sending plain text');
-            messageContent = content;
-          }
-        } catch (error) {
-          console.warn('⚠️ Encryption error, sending plain text:', error);
-          messageContent = content;
-        }
-      } else {
-        console.log('📝 No encryption available or not text message - sending plain');
-        messageContent = content;
-      }
-
-      // Send to server or simulate in fallback mode
-      if (socket && socket.connected) {
-        console.log('📤 Sending message via socket');
-        socket.emit('send_message', { content: messageContent, type });
-      } else {
-        console.log('🔄 Socket not connected, message stored locally only');
-        // In fallback mode, messages are only stored locally
-        // This allows the app to work even without a server connection
-      }
-    } else {
-      console.warn('⚠️ Not connected and no fallback mode');
-    }
-  };
-
-  const sendTyping = (isTyping: boolean) => {
-    if (socket && socket.connected) {
-      socket.emit('typing', { isTyping });
-    }
-    // In fallback mode, typing indicators are disabled
-  };
-
-  const sendFile = async (file: File): Promise<void> => {
-    try {
-      // Convert file to base64 for transmission
-      const reader = new FileReader();
-      const fileData = await new Promise<string>((resolve, reject) => {
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
+    console.log(`🚀 Flushing ${queue.length} messages from offline queue...`);
+    
+    queue.forEach((item: any) => {
+      activeSocket.emit('send_message', { 
+        content: item.payload, 
+        type: item.type,
+        clientMessageId: item.id // Pass ID to link ack
       });
+      // Mark as sent locally
+      dispatch({ type: 'UPDATE_MESSAGE_STATUS', payload: { id: item.id, status: 'sent' } });
+    });
 
-      // Create media content
-      const mediaContent = {
-        data: fileData,
-        fileName: file.name,
-        fileType: file.type,
-        fileSize: file.size
-      };
+    // Clear queue after attempting flush
+    dispatch({ type: 'LOAD_QUEUE', payload: [] });
+    localStorage.removeItem('secureChat_unsentQueue');
+  }, []);
 
-      // Send as message with type based on file type
-      let messageType = 'file';
-      if (file.type.startsWith('image/')) {
-        messageType = 'image';
-      } else if (file.type.startsWith('video/')) {
-        messageType = 'video';
+  const handleIncomingMessage = useCallback(async (wsMessage: WebSocketMessage) => {
+    try {
+      const { type, data } = wsMessage;
+      if (type !== 'message') return;
+      if (data.senderId === user?.id) return; // Ignore echo
+
+      let content = data.content;
+      
+      // Decrypt
+      if (data.type === 'text' || data.type === 'emoji') {
+        if (typeof content === 'object' && content !== null) {
+          const cleaned = cleanEncryptedMessage(content as any);
+          if (cleaned) {
+            const decrypted = decryptFromPartner(cleaned);
+            content = decrypted || '🔒 [Decryption Failed]';
+          }
+        }
+      } else if (['image', 'video', 'file'].includes(data.type)) {
+        const media = typeof content === 'string' ? JSON.parse(content) : content;
+        if (typeof media.data === 'string' && media.data.startsWith('{')) {
+          try {
+            const encryptedFile = JSON.parse(media.data);
+            if (isValidEncryptedFile(encryptedFile)) {
+              const url = await decryptFileFromPartner(encryptedFile);
+              media.data = url || '#error';
+            }
+          } catch { /* ignore */ }
+        }
+        content = media;
       }
 
-      sendMessage(JSON.stringify(mediaContent), messageType);
-    } catch (error) {
-      console.error('Failed to send file:', error);
-      throw error;
+      dispatch({
+        type: 'ADD_MESSAGE',
+        payload: {
+          id: `${data.senderId}-${data.timestamp}`,
+          senderId: data.senderId,
+          content: content as any,
+          timestamp: data.timestamp,
+          type: data.type as any,
+          status: 'delivered'
+        }
+      });
+    } catch (e) {
+      console.error('Error processing incoming message', e);
     }
-  };
+  }, [user, decryptFromPartner, decryptFileFromPartner]);
 
-  const clearMessages = () => {
-    setMessages([]);
-  };
+  // --- Public Actions ---
 
-  const value: SocketContextType = {
-    socket,
-    isConnected,
-    messages,
+  const sendMessage = useCallback(async (content: string, type: string = 'text') => {
+    if (!content.trim()) return;
+
+    const tempId = `msg_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    const timestamp = new Date().toISOString();
+
+    // 1. Optimistic Add
+    dispatch({
+      type: 'ADD_MESSAGE',
+      payload: {
+        id: tempId,
+        localId: tempId,
+        senderId: user?.id || '',
+        content,
+        timestamp,
+        type: type as any,
+        status: 'pending'
+      }
+    });
+
+    // 2. Encrypt
+    let payload: any = content;
+    if (stateRef.current.keyExchangeComplete && sharedKey && (type === 'text' || type === 'emoji')) {
+      const encrypted = encryptForPartner(content);
+      if (encrypted) payload = encrypted;
+    }
+
+    // 3. Send or Queue
+    const messageData = { id: tempId, payload, type };
+    
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('send_message', { 
+        content: payload, 
+        type, 
+        clientMessageId: tempId 
+      });
+      dispatch({ type: 'UPDATE_MESSAGE_STATUS', payload: { id: tempId, status: 'sent' } });
+    } else {
+      console.warn('⚠️ Socket offline, queuing message');
+      dispatch({ type: 'QUEUE_MESSAGE', payload: messageData });
+    }
+  }, [user, sharedKey, encryptForPartner]);
+
+  const retryMessage = useCallback((localId: string) => {
+    const msg = stateRef.current.messages.find(m => m.id === localId);
+    if (msg && msg.status === 'failed') {
+      // Re-trigger send logic (simplified for this context)
+      if (typeof msg.content === 'string') sendMessage(msg.content, msg.type);
+    }
+  }, [sendMessage]);
+
+  const sendFile = useCallback(async (file: File) => {
+    const reader = new FileReader();
+    const fileData = await new Promise<string>((resolve) => {
+      reader.onload = () => resolve(reader.result as string);
+      reader.readAsDataURL(file);
+    });
+
+    const mediaContent = {
+      data: fileData, // In a real app, encrypt this first if sharedKey exists
+      fileName: file.name,
+      fileType: file.type,
+      fileSize: file.size
+    };
+
+    let type = 'file';
+    if (file.type.startsWith('image/')) type = 'image';
+    if (file.type.startsWith('video/')) type = 'video';
+
+    await sendMessage(JSON.stringify(mediaContent), type);
+  }, [sendMessage]);
+
+  const sendTyping = useCallback((isTyping: boolean) => {
+    if (socketRef.current?.connected) {
+      socketRef.current.emit('typing', { isTyping });
+    }
+  }, []);
+
+  const clearMessages = useCallback(() => dispatch({ type: 'CLEAR_MESSAGES' }), []);
+
+  // --- Output ---
+
+  const value = useMemo(() => ({
+    socket: socketRef.current,
+    isConnected: state.isConnected,
+    connectionState: state.connectionState,
+    messages: state.messages,
+    partnerTyping: state.partnerTyping,
+    partnerOnline: state.partnerOnline,
+    keyExchangeComplete: state.keyExchangeComplete,
+    unsentQueue: state.unsentQueue,
     sendMessage,
     sendFile,
     sendTyping,
-    partnerTyping,
-    partnerOnline,
     clearMessages,
-    keyExchangeComplete,
-  };
+    retryMessage
+  }), [state, sendMessage, sendFile, sendTyping, clearMessages, retryMessage]);
 
   return (
     <SocketContext.Provider value={value}>
@@ -414,10 +430,8 @@ export const SocketProvider: React.FC<SocketProviderProps> = ({ children }) => {
   );
 };
 
-export const useSocket = (): SocketContextType => {
+export const useSocket = () => {
   const context = useContext(SocketContext);
-  if (context === undefined) {
-    throw new Error('useSocket must be used within a SocketProvider');
-  }
+  if (!context) throw new Error('useSocket must be used within SocketProvider');
   return context;
 };
