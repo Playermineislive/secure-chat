@@ -1,9 +1,8 @@
 import "dotenv/config";
-import express from "express";
+import express, { Request, Response, NextFunction } from "express";
 import cors from "cors";
-import { createServer } from "http";
-import { Server } from "socket.io";
-import { handleDemo } from "./routes/demo";
+import { createServer as createHttpServer } from "http";
+import { Server, Socket } from "socket.io";
 import { 
   handleSignup, 
   handleLogin, 
@@ -17,243 +16,272 @@ import {
   handleGetConnectionStatus, 
   handleDisconnect, 
   authenticateUser, 
-  getPartnerIdForUser 
+  pairingService // Import the service instance we created
 } from "./routes/pairing";
 import { WebSocketMessage } from "@shared/api";
 
-export function createAppServer() {
-  const app = express();
-  const httpServer = createServer(app);
-  
-  // Setup Socket.IO with CORS
-  const io = new Server(httpServer, {
-    cors: {
-      origin: "*", // In production, specify your domain
-      methods: ["GET", "POST"]
-    }
-  });
+// --- Types ---
+interface AuthenticatedSocket extends Socket {
+  userId: string;
+  userEmail: string;
+}
 
-  // Middleware
-  app.use(cors());
-  app.use(express.json());
-  app.use(express.urlencoded({ extended: true }));
+// --- Socket Manager ---
+// Encapsulates all Real-Time logic
+class SocketManager {
+  private io: Server;
+  // Map<UserId, SocketId> - In production, use Redis Adapter for this
+  private userSockets = new Map<string, string>(); 
+  private userPublicKeys = new Map<string, string>();
 
-  // Test routes
-  app.get("/api/ping", (_req, res) => {
-    const ping = process.env.PING_MESSAGE ?? "ping";
-    res.json({ message: ping });
-  });
+  constructor(io: Server) {
+    this.io = io;
+    this.setupMiddleware();
+    this.setupEventHandlers();
+    this.setupPairingIntegration();
+  }
 
-  app.get("/api/demo", handleDemo);
+  private setupMiddleware() {
+    this.io.use(async (socket, next) => {
+      const token = socket.handshake.auth.token;
+      if (!token) return next(new Error("Authentication error: No token"));
 
-  // Authentication routes
-  app.post("/api/auth/signup", handleSignup);
-  app.post("/api/auth/login", handleLogin);
-  app.get("/api/auth/verify", handleVerifyToken);
+      const decoded = verifyToken(token);
+      if (!decoded) return next(new Error("Authentication error: Invalid token"));
 
-  // Pairing routes (require authentication)
-  app.post("/api/pairing/generate-code", authenticateUser, handleGenerateCode);
-  app.post("/api/pairing/connect-code", authenticateUser, handleConnectCode);
-  app.get("/api/pairing/status", authenticateUser, handleGetConnectionStatus);
-  app.post("/api/pairing/disconnect", authenticateUser, handleDisconnect);
+      // We can use the service helper directly now
+      const user = await getUserById(decoded.userId);
+      if (!user) return next(new Error("User not found"));
 
-  // WebSocket authentication middleware
-  io.use((socket, next) => {
-    const token = socket.handshake.auth.token;
-    if (!token) {
-      return next(new Error("Authentication error"));
-    }
+      // Attach user info to socket
+      (socket as AuthenticatedSocket).userId = user.id;
+      (socket as AuthenticatedSocket).userEmail = user.email;
+      next();
+    });
+  }
 
-    const decoded = verifyToken(token);
-    if (!decoded) {
-      return next(new Error("Authentication error"));
-    }
+  // Bridging the REST API world with the WebSocket world
+  private setupPairingIntegration() {
+    // Listen for the 'paired' event emitted by PairingService
+    // This allows instant updates when a REST API call finishes successfully
+    pairingService.on("paired", ({ connectionId, hostId, clientId }) => {
+      console.log(`⚡ Pairing event received: ${hostId} <-> ${clientId}`);
 
-    const user = getUserById(decoded.userId);
-    if (!user) {
-      return next(new Error("User not found"));
-    }
+      const hostSocket = this.userSockets.get(hostId);
+      const clientSocket = this.userSockets.get(clientId);
 
-    socket.userId = user.id;
-    socket.userEmail = user.email;
-    next();
-  });
+      const payload = {
+        type: "connection_established",
+        connectionId,
+        timestamp: new Date().toISOString()
+      };
 
-  // Store active socket connections and public keys
-  const userSockets = new Map<string, string>(); // userId -> socketId
-  const userPublicKeys = new Map<string, string>(); // userId -> publicKey
-
-  // WebSocket connection handling
-  io.on("connection", (socket: any) => {
-    console.log(`User connected: ${socket.userEmail} (${socket.userId})`);
-    
-    // Store user's socket connection
-    userSockets.set(socket.userId, socket.id);
-
-    // Notify partner about connection
-    const partnerId = getPartnerIdForUser(socket.userId);
-    if (partnerId) {
-      const partnerSocketId = userSockets.get(partnerId);
-      if (partnerSocketId) {
-        const message: WebSocketMessage = {
-          type: "user_connected",
-          data: { userId: socket.userId, email: socket.userEmail },
-          timestamp: new Date().toISOString(),
-        };
-        io.to(partnerSocketId).emit("message", message);
-
-        // Exchange public keys if both users have them
-        const partnerPublicKey = userPublicKeys.get(partnerId);
-        const userPublicKey = userPublicKeys.get(socket.userId);
-        
-        if (partnerPublicKey) {
-          socket.emit("key_exchange", { 
-            publicKey: partnerPublicKey, 
-            userId: partnerId 
-          });
-        }
-        
-        if (userPublicKey && partnerSocketId) {
-          io.to(partnerSocketId).emit("key_exchange", { 
-            publicKey: userPublicKey, 
-            userId: socket.userId 
-          });
-        }
-      }
-    }
-
-    // Handle key exchange
-    socket.on("key_exchange", (data: { publicKey: string }) => {
-      console.log(`Received public key from ${socket.userEmail}`);
-      
-      // Store the public key
-      userPublicKeys.set(socket.userId, data.publicKey);
-      
-      // Send to partner if connected
-      const partnerId = getPartnerIdForUser(socket.userId);
-      if (partnerId) {
-        const partnerSocketId = userSockets.get(partnerId);
-        if (partnerSocketId) {
-          io.to(partnerSocketId).emit("key_exchange", {
-            publicKey: data.publicKey,
-            userId: socket.userId
-          });
-          console.log(`Forwarded public key to partner ${partnerId}`);
-        }
-      }
+      if (hostSocket) this.io.to(hostSocket).emit("pairing_update", { ...payload, partnerId: clientId });
+      if (clientSocket) this.io.to(clientSocket).emit("pairing_update", { ...payload, partnerId: hostId });
     });
 
-    // Handle incoming messages (can be encrypted or plain text)
-    socket.on("send_message", (data: { content: string | object; type: string }) => {
-      try {
-        const partnerId = getPartnerIdForUser(socket.userId);
-        if (!partnerId) {
-          socket.emit("error", { message: "No active connection" });
-          return;
-        }
+    // Handle Disconnects initiated via API
+    pairingService.on("disconnected", ({ userId1, userId2 }) => {
+      [userId1, userId2].forEach(uid => {
+        const sock = this.userSockets.get(uid);
+        if (sock) this.io.to(sock).emit("pairing_update", { type: "disconnected" });
+      });
+    });
+  }
 
-        const partnerSocketId = userSockets.get(partnerId);
-        if (!partnerSocketId) {
-          socket.emit("error", { message: "Partner not online" });
-          return;
-        }
+  private setupEventHandlers() {
+    this.io.on("connection", (rawSocket: Socket) => {
+      const socket = rawSocket as AuthenticatedSocket;
+      console.log(`User connected: ${socket.userEmail} (${socket.userId})`);
+      
+      this.handleUserConnection(socket);
+      
+      // Standard Message Handler
+      socket.on("send_message", (data) => this.handleMessage(socket, data));
+      
+      // E2EE Key Exchange / WebRTC Signaling
+      socket.on("signal", (data) => this.handleSignaling(socket, data));
+      
+      // Typing Indicators
+      socket.on("typing", (data) => this.handleTyping(socket, data));
+      
+      // Disconnect
+      socket.on("disconnect", () => this.handleDisconnect(socket));
+    });
+  }
 
+  private async handleUserConnection(socket: AuthenticatedSocket) {
+    this.userSockets.set(socket.userId, socket.id);
+    
+    // Check if they are already paired and notify partner
+    const connection = await pairingService.getUserConnection(socket.userId);
+    if (connection && connection.isActive) {
+      const partnerId = connection.userId1 === socket.userId ? connection.userId2 : connection.userId1;
+      const partnerSocket = this.userSockets.get(partnerId);
+      
+      if (partnerSocket) {
+        this.io.to(partnerSocket).emit("user_status", { 
+          userId: socket.userId, 
+          status: "online" 
+        });
+      }
+    }
+  }
+
+  private async handleMessage(socket: AuthenticatedSocket, data: any) {
+    try {
+      const connection = await pairingService.getUserConnection(socket.userId);
+      if (!connection) {
+        return socket.emit("error", { message: "No active pairing connection" });
+      }
+
+      const partnerId = connection.userId1 === socket.userId ? connection.userId2 : connection.userId1;
+      const partnerSocketId = this.userSockets.get(partnerId);
+
+      if (partnerSocketId) {
         const message: WebSocketMessage = {
           type: "message",
           data: {
             senderId: socket.userId,
-            content: data.content, // Can be encrypted object or plain string
+            content: data.content,
             type: data.type || "text",
             timestamp: new Date().toISOString(),
           },
           timestamp: new Date().toISOString(),
         };
-
-        // Send to partner
-        io.to(partnerSocketId).emit("message", message);
-        
-        // Send confirmation back to sender
-        socket.emit("message_sent", { success: true });
-      } catch (error) {
-        console.error("Message sending error:", error);
-        socket.emit("error", { message: "Failed to send message" });
+        this.io.to(partnerSocketId).emit("message", message);
+        socket.emit("message_sent", { success: true, tempId: data.tempId });
+      } else {
+        // Optional: Store offline messages here
+        socket.emit("error", { message: "Partner is offline" });
       }
-    });
+    } catch (e) {
+      console.error("Message error", e);
+    }
+  }
 
-    // Handle typing indicators
-    socket.on("typing", (data: { isTyping: boolean }) => {
-      try {
-        const partnerId = getPartnerIdForUser(socket.userId);
-        if (!partnerId) return;
+  private async handleSignaling(socket: AuthenticatedSocket, data: any) {
+    // Generic signaling handler (works for Public Keys OR WebRTC offers/answers)
+    const connection = await pairingService.getUserConnection(socket.userId);
+    if (!connection) return;
 
-        const partnerSocketId = userSockets.get(partnerId);
-        if (!partnerSocketId) return;
+    const partnerId = connection.userId1 === socket.userId ? connection.userId2 : connection.userId1;
+    const partnerSocketId = this.userSockets.get(partnerId);
 
-        const message: WebSocketMessage = {
-          type: "typing",
-          data: {
-            userId: socket.userId,
-            isTyping: data.isTyping,
-          },
-          timestamp: new Date().toISOString(),
-        };
+    if (partnerSocketId) {
+      this.io.to(partnerSocketId).emit("signal", {
+        senderId: socket.userId,
+        type: data.type, // 'public_key', 'offer', 'answer', 'candidate'
+        payload: data.payload
+      });
+    }
+  }
 
-        io.to(partnerSocketId).emit("message", message);
-      } catch (error) {
-        console.error("Typing indicator error:", error);
+  private async handleTyping(socket: AuthenticatedSocket, data: { isTyping: boolean }) {
+    const connection = await pairingService.getUserConnection(socket.userId);
+    if (!connection) return;
+
+    const partnerId = connection.userId1 === socket.userId ? connection.userId2 : connection.userId1;
+    const partnerSocketId = this.userSockets.get(partnerId);
+
+    if (partnerSocketId) {
+      this.io.to(partnerSocketId).emit("typing", {
+        userId: socket.userId,
+        isTyping: data.isTyping
+      });
+    }
+  }
+
+  private async handleDisconnect(socket: AuthenticatedSocket) {
+    console.log(`User disconnected: ${socket.userEmail}`);
+    this.userSockets.delete(socket.userId);
+    
+    // Notify partner
+    const connection = await pairingService.getUserConnection(socket.userId);
+    if (connection) {
+      const partnerId = connection.userId1 === socket.userId ? connection.userId2 : connection.userId1;
+      const partnerSocketId = this.userSockets.get(partnerId);
+      if (partnerSocketId) {
+        this.io.to(partnerSocketId).emit("user_status", { 
+          userId: socket.userId, 
+          status: "offline" 
+        });
       }
-    });
-
-    // Handle disconnection
-    socket.on("disconnect", () => {
-      console.log(`User disconnected: ${socket.userEmail} (${socket.userId})`);
-      
-      // Remove from active connections
-      userSockets.delete(socket.userId);
-      userPublicKeys.delete(socket.userId);
-
-      // Notify partner about disconnection
-      const partnerId = getPartnerIdForUser(socket.userId);
-      if (partnerId) {
-        const partnerSocketId = userSockets.get(partnerId);
-        if (partnerSocketId) {
-          const message: WebSocketMessage = {
-            type: "user_disconnected",
-            data: { userId: socket.userId, email: socket.userEmail },
-            timestamp: new Date().toISOString(),
-          };
-          io.to(partnerSocketId).emit("message", message);
-        }
-      }
-    });
-  });
-
-  return httpServer;
+    }
+  }
 }
 
-// For development with Vite
-export function createServer() {
+// --- App Factory ---
+
+export function createAppServer() {
   const app = express();
+  const httpServer = createHttpServer(app);
+  
+  // Setup Socket.IO
+  const io = new Server(httpServer, {
+    cors: {
+      origin: process.env.CLIENT_URL || "*", 
+      methods: ["GET", "POST"]
+    }
+  });
+
+  // Initialize Socket Logic
+  new SocketManager(io);
 
   // Middleware
   app.use(cors());
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
-  // Test routes
-  app.get("/api/ping", (_req, res) => {
-    const ping = process.env.PING_MESSAGE ?? "ping";
-    res.json({ message: ping });
+  // Request Logging (Optional)
+  app.use((req, res, next) => {
+    console.log(`${req.method} ${req.path}`);
+    next();
   });
 
-  app.get("/api/demo", handleDemo);
+  // --- Routes ---
 
-  // Authentication routes
+  app.get("/api/ping", (_req, res) => {
+    res.json({ message: "pong", timestamp: new Date() });
+  });
+
+  // Auth
   app.post("/api/auth/signup", handleSignup);
   app.post("/api/auth/login", handleLogin);
   app.get("/api/auth/verify", handleVerifyToken);
 
-  // Pairing routes (require authentication)
+  // Pairing (Protected)
+  const pairingRouter = express.Router();
+  pairingRouter.use(authenticateUser);
+  pairingRouter.post("/generate-code", handleGenerateCode);
+  pairingRouter.post("/connect-code", handleConnectCode);
+  pairingRouter.get("/status", handleGetConnectionStatus);
+  pairingRouter.post("/disconnect", handleDisconnect);
+  
+  app.use("/api/pairing", pairingRouter);
+
+  // Global Error Handler
+  app.use((err: any, req: Request, res: Response, next: NextFunction) => {
+    console.error("Unhandled Error:", err);
+    res.status(500).json({ success: false, message: "Internal server error" });
+  });
+
+  return httpServer;
+}
+
+// --- Development/Vite Helper ---
+export function createServer() {
+  // Return just the express app for Vite middleware compatibility
+  const app = express();
+  app.use(cors());
+  app.use(express.json());
+
+  app.get("/api/ping", (_req, res) => res.json({ message: "pong" }));
+  
+  app.post("/api/auth/signup", handleSignup);
+  app.post("/api/auth/login", handleLogin);
+  app.get("/api/auth/verify", handleVerifyToken);
+
   app.post("/api/pairing/generate-code", authenticateUser, handleGenerateCode);
   app.post("/api/pairing/connect-code", authenticateUser, handleConnectCode);
   app.get("/api/pairing/status", authenticateUser, handleGetConnectionStatus);
