@@ -4,83 +4,72 @@ import { useSocket } from '../contexts/SocketContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Badge } from '@/components/ui/badge';
 import { 
   Loader2, 
   Copy, 
   RefreshCw, 
   Users, 
   Clock, 
-  Shield,
+  ShieldCheck,
   CheckCircle,
-  UserPlus
+  Link,
+  ArrowRight,
+  Wifi
 } from 'lucide-react';
 import { 
   GenerateCodeResponse, 
   ConnectCodeResponse, 
   ConnectionStatus 
 } from '@shared/api';
+import { motion, AnimatePresence } from 'framer-motion';
 
 interface PairingProps {
   onPaired: (partnerInfo: { id: string; email: string }) => void;
 }
 
 export default function Pairing({ onPaired }: PairingProps) {
-  const { token, user } = useAuth();
+  const { token } = useAuth();
   const { clearMessages } = useSocket();
   const [activeTab, setActiveTab] = useState('generate');
   
-  // Generate code state
+  // States
   const [generatedCode, setGeneratedCode] = useState('');
   const [codeExpiry, setCodeExpiry] = useState<Date | null>(null);
   const [isGenerating, setIsGenerating] = useState(false);
   const [generateError, setGenerateError] = useState('');
   
-  // Connect code state
   const [connectCode, setConnectCode] = useState('');
   const [isConnecting, setIsConnecting] = useState(false);
   const [connectError, setConnectError] = useState('');
   const [connectSuccess, setConnectSuccess] = useState(false);
   
-  // Connection status
   const [connectionStatus, setConnectionStatus] = useState<ConnectionStatus | null>(null);
   const [isCheckingStatus, setIsCheckingStatus] = useState(true);
   const [partner, setPartner] = useState<{ id: string; email: string } | null>(null);
-
-  // Timer for code expiry
   const [timeLeft, setTimeLeft] = useState<number>(0);
 
-  // Check connection status on mount and clean up any stale connections
+  // --- Logic (Identical functionality, improved flow) ---
+
   useEffect(() => {
-    // First, try to disconnect any existing connection
-    disconnectExisting().then(() => {
-      checkConnectionStatus();
-    });
+    disconnectExisting().then(() => checkConnectionStatus());
   }, []);
 
   const disconnectExisting = async () => {
     try {
       await fetch('/api/pairing/disconnect', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+        headers: { 'Authorization': `Bearer ${token}` },
       });
-    } catch (error) {
-      console.log('No existing connection to disconnect');
-    }
+    } catch (e) { /* ignore */ }
   };
 
-  // Update timer for code expiry
   useEffect(() => {
     if (codeExpiry) {
       const interval = setInterval(() => {
-        const now = new Date();
-        const diff = codeExpiry.getTime() - now.getTime();
-
+        const diff = codeExpiry.getTime() - new Date().getTime();
         if (diff <= 0) {
           setTimeLeft(0);
           setGeneratedCode('');
@@ -89,433 +78,311 @@ export default function Pairing({ onPaired }: PairingProps) {
           setTimeLeft(Math.floor(diff / 1000));
         }
       }, 1000);
-
       return () => clearInterval(interval);
     }
   }, [codeExpiry]);
 
-  // Continuous polling to check for partner connections
+  // Polling
   useEffect(() => {
     if (!connectionStatus?.isConnected && !isCheckingStatus) {
       const pollInterval = setInterval(async () => {
         try {
-          console.log('Polling for connection status...');
-          const response = await fetch('/api/pairing/status', {
-            headers: {
-              'Authorization': `Bearer ${token}`,
-            },
+          const res = await fetch('/api/pairing/status', {
+            headers: { 'Authorization': `Bearer ${token}` },
           });
-
-          if (response.ok) {
-            const status: ConnectionStatus = await response.json();
-            console.log('Connection status:', status);
-
+          if (res.ok) {
+            const status: ConnectionStatus = await res.json();
             if (status.isConnected && status.partnerEmail) {
-              console.log('Partner connected! Transitioning to chat...');
-              setPartner({
-                id: status.partnerId!,
-                email: status.partnerEmail,
-              });
+              setPartner({ id: status.partnerId!, email: status.partnerEmail });
               clearMessages();
-
-              // Transition to chat immediately
-              onPaired({
-                id: status.partnerId!,
-                email: status.partnerEmail,
-              });
+              onPaired({ id: status.partnerId!, email: status.partnerEmail });
             }
           }
-        } catch (error) {
-          console.error('Polling error:', error);
-        }
-      }, 2000); // Poll every 2 seconds for faster response
-
-      return () => {
-        clearInterval(pollInterval);
-      };
+        } catch (e) { console.error(e); }
+      }, 2000);
+      return () => clearInterval(pollInterval);
     }
   }, [connectionStatus?.isConnected, isCheckingStatus, token, onPaired, clearMessages]);
 
   const checkConnectionStatus = async () => {
     try {
-      const response = await fetch('/api/pairing/status', {
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+      const res = await fetch('/api/pairing/status', {
+        headers: { 'Authorization': `Bearer ${token}` },
       });
-
-      if (response.ok) {
-        const status: ConnectionStatus = await response.json();
+      if (res.ok) {
+        const status = await res.json();
         setConnectionStatus(status);
-        
         if (status.isConnected && status.partnerEmail) {
-          setPartner({
-            id: status.partnerId!,
-            email: status.partnerEmail,
-          });
+          setPartner({ id: status.partnerId!, email: status.partnerEmail });
         }
       }
-    } catch (error) {
-      console.error('Failed to check connection status:', error);
-    } finally {
-      setIsCheckingStatus(false);
-    }
+    } catch (e) { console.error(e); }
+    finally { setIsCheckingStatus(false); }
   };
 
   const generateCode = async () => {
     setIsGenerating(true);
     setGenerateError('');
-
     try {
-      // First, clean up any existing connections
       await disconnectExisting();
-
-      const response = await fetch('/api/pairing/generate-code', {
+      const res = await fetch('/api/pairing/generate-code', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${token}`,
-        },
+        headers: { 'Authorization': `Bearer ${token}` },
       });
-
-      const data: GenerateCodeResponse = await response.json();
-
+      const data: GenerateCodeResponse = await res.json();
       if (data.success && data.code) {
         setGeneratedCode(data.code);
         setCodeExpiry(new Date(data.expiresAt!));
       } else {
-        setGenerateError(data.message || 'Failed to generate code');
+        setGenerateError(data.message || 'Failed to generate');
       }
-    } catch (error) {
-      console.error('Generate code error:', error);
-      setGenerateError('Network error occurred. Please try again.');
-    } finally {
-      setIsGenerating(false);
-    }
+    } catch (e) { setGenerateError('Network error'); }
+    finally { setIsGenerating(false); }
   };
 
   const connectWithCode = async () => {
-    if (!connectCode.trim()) {
-      setConnectError('Please enter a code');
-      return;
-    }
-
+    if (!connectCode.trim()) return;
     setIsConnecting(true);
     setConnectError('');
-    setConnectSuccess(false);
-
     try {
-      // First, clean up any existing connections
       await disconnectExisting();
-
-      const response = await fetch('/api/pairing/connect-code', {
+      const res = await fetch('/api/pairing/connect-code', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`,
-        },
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
         body: JSON.stringify({ code: connectCode.trim().toUpperCase() }),
       });
-
-      const data: ConnectCodeResponse = await response.json();
-
+      const data: ConnectCodeResponse = await res.json();
       if (data.success) {
-        const partnerInfo = {
-          id: data.partnerId!,
-          email: data.partnerEmail!,
-        };
-        setPartner(partnerInfo);
+        setPartner({ id: data.partnerId!, email: data.partnerEmail! });
         setConnectSuccess(true);
         clearMessages();
-
-        // Update connection status to stop polling
-        setConnectionStatus({
-          isConnected: true,
-          partnerId: partnerInfo.id,
-          partnerEmail: partnerInfo.email,
-          connectionId: 'new-connection'
-        });
-
-        // Add a small delay for smooth transition
-        setTimeout(() => {
-          onPaired(partnerInfo);
-        }, 1500);
+        setTimeout(() => onPaired({ id: data.partnerId!, email: data.partnerEmail! }), 1500);
       } else {
         setConnectError(data.message || 'Failed to connect');
       }
-    } catch (error) {
-      console.error('Connection error:', error);
-      setConnectError('Network error occurred. Please try again.');
-    } finally {
-      setIsConnecting(false);
-    }
+    } catch (e) { setConnectError('Network error'); }
+    finally { setIsConnecting(false); }
   };
 
-  const copyCode = () => {
-    if (generatedCode) {
-      navigator.clipboard.writeText(generatedCode);
-    }
-  };
+  const formatTime = (s: number) => `${Math.floor(s / 60)}:${(s % 60).toString().padStart(2, '0')}`;
 
-  const formatTime = (seconds: number): string => {
-    const mins = Math.floor(seconds / 60);
-    const secs = seconds % 60;
-    return `${mins}:${secs.toString().padStart(2, '0')}`;
-  };
+  // --- UI RENDER ---
 
+  // 1. Initial Loading
   if (isCheckingStatus) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-violet-600 via-purple-600 to-blue-700 flex items-center justify-center">
-        <div className="glass bg-white/10 backdrop-blur-md rounded-2xl p-8 border border-white/20">
-          <div className="flex items-center space-x-3 text-white">
-            <Loader2 className="w-6 h-6 animate-spin" />
-            <span>Checking connection status...</span>
-          </div>
+      <div className="min-h-screen bg-[#F0F2F5] flex items-center justify-center">
+        <div className="bg-white p-8 rounded-2xl shadow-xl border border-slate-100 flex flex-col items-center">
+          <Loader2 className="w-8 h-8 text-indigo-600 animate-spin mb-4" />
+          <p className="text-slate-600 font-medium">Checking status...</p>
         </div>
       </div>
     );
   }
 
+  // 2. Success State
   if (connectionStatus?.isConnected && partner) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-violet-600 via-purple-600 to-blue-700 flex items-center justify-center p-4">
-        <Card className="glass bg-white/10 backdrop-blur-md border-white/20 w-full max-w-md">
-          <CardHeader className="text-center">
-            <div className="mx-auto w-16 h-16 bg-green-500/20 rounded-full flex items-center justify-center mb-4">
-              <CheckCircle className="w-8 h-8 text-green-400" />
+      <div className="min-h-screen bg-[#F0F2F5] flex items-center justify-center p-4 font-sans text-slate-900">
+        <motion.div 
+          initial={{ opacity: 0, scale: 0.9 }}
+          animate={{ opacity: 1, scale: 1 }}
+          className="w-full max-w-md bg-white rounded-2xl shadow-xl overflow-hidden border border-slate-100"
+        >
+          <div className="bg-green-50 p-8 text-center border-b border-green-100">
+            <div className="w-16 h-16 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-4 shadow-sm">
+              <CheckCircle className="w-8 h-8 text-green-600" />
             </div>
-            <CardTitle className="text-2xl text-white">Connected!</CardTitle>
-            <CardDescription className="text-purple-100">
-              You're now securely connected with your partner
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-6">
-            <div className="glass bg-white/5 rounded-lg p-4 border border-white/10">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-purple-200">Connected to:</p>
-                  <p className="text-white font-medium">{partner.email}</p>
-                </div>
-                <div className="w-3 h-3 bg-green-400 rounded-full animate-pulse"></div>
+            <h2 className="text-2xl font-bold text-green-800">Connected!</h2>
+            <p className="text-green-600 mt-1">Secure channel established</p>
+          </div>
+          
+          <div className="p-6 space-y-6">
+            <div className="bg-slate-50 p-4 rounded-xl border border-slate-200 flex items-center space-x-4">
+              <div className="w-10 h-10 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-600 font-bold text-lg">
+                {partner.email.charAt(0).toUpperCase()}
+              </div>
+              <div>
+                <p className="text-xs text-slate-500 font-medium uppercase tracking-wider">Chatting with</p>
+                <p className="text-slate-900 font-medium">{partner.email}</p>
               </div>
             </div>
 
-            <div className="space-y-3 text-sm text-purple-100">
-              <div className="flex items-center">
-                <Shield className="w-4 h-4 mr-3 text-green-400" />
-                End-to-end encryption active
-              </div>
-              <div className="flex items-center">
-                <Users className="w-4 h-4 mr-3 text-blue-400" />
-                Private chat session established
-              </div>
-            </div>
-
-            <Button
+            <Button 
               onClick={() => onPaired(partner)}
-              className="w-full bg-white text-purple-700 hover:bg-white/90 font-semibold py-6"
+              className="w-full h-12 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-lg hover:shadow-indigo-200 transition-all"
             >
-              Start Secure Chat
+              Start Chatting <ArrowRight className="ml-2 w-4 h-4" />
             </Button>
-          </CardContent>
-        </Card>
+          </div>
+        </motion.div>
       </div>
     );
   }
 
+  // 3. Main Pairing Interface
   return (
-    <div className="min-h-screen bg-gradient-to-br from-violet-600 via-purple-600 to-blue-700 relative overflow-hidden">
-      {/* Background elements */}
-      <div className="absolute top-20 left-20 w-32 h-32 bg-white/10 rounded-full blur-xl animate-pulse-glow"></div>
-      <div className="absolute bottom-32 right-32 w-24 h-24 bg-purple-300/20 rounded-full blur-lg animate-bounce"></div>
-
-      <div className="relative z-10 min-h-screen flex items-center justify-center p-4 sm:p-6">
-        <div className="w-full max-w-md space-y-6">
-          {/* Header */}
-          <div className="text-center space-y-2">
-            <h1 className="text-3xl font-bold text-white">Connect Securely</h1>
-            <p className="text-purple-100">Generate a code or enter a partner's code to start chatting</p>
-          </div>
-
-          {/* Main card */}
-          <Card className="glass bg-white/10 backdrop-blur-md border-white/20">
-            <CardHeader>
-              <CardTitle className="text-white">Pairing Options</CardTitle>
-              <CardDescription className="text-purple-100">
-                Choose how you want to connect with your chat partner
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-                <TabsList className="grid w-full grid-cols-2 bg-white/10 border border-white/20">
-                  <TabsTrigger 
-                    value="generate" 
-                    className="text-white data-[state=active]:bg-white/20 data-[state=active]:text-white"
-                  >
-                    Generate Code
-                  </TabsTrigger>
-                  <TabsTrigger 
-                    value="connect" 
-                    className="text-white data-[state=active]:bg-white/20 data-[state=active]:text-white"
-                  >
-                    Enter Code
-                  </TabsTrigger>
-                </TabsList>
-
-                <TabsContent value="generate" className="space-y-4 mt-6">
-                  {generateError && (
-                    <Alert className="bg-red-500/20 border-red-400/50 text-white">
-                      <AlertDescription>{generateError}</AlertDescription>
-                    </Alert>
-                  )}
-
-                  {generatedCode ? (
-                    <div className="space-y-4">
-                      <div className="glass bg-white/5 rounded-lg p-6 text-center border border-white/10">
-                        <Label className="text-purple-200 text-sm">Your Code</Label>
-                        <div className="flex items-center justify-center space-x-2 mt-2">
-                          <span className="text-3xl font-mono font-bold text-white tracking-wider">
-                            {generatedCode}
-                          </span>
-                          <Button
-                            variant="ghost"
-                            size="sm"
-                            onClick={copyCode}
-                            className="text-purple-200 hover:text-white hover:bg-white/10"
-                          >
-                            <Copy className="w-4 h-4" />
-                          </Button>
-                        </div>
-                        
-                        <div className="mt-3 space-y-2">
-                          {timeLeft > 0 && (
-                            <div className="flex items-center justify-center space-x-2 text-purple-200">
-                              <Clock className="w-4 h-4" />
-                              <span className="text-sm">Expires in {formatTime(timeLeft)}</span>
-                            </div>
-                          )}
-
-                          {generatedCode && timeLeft > 0 && (
-                            <div className="flex items-center justify-center space-x-2 text-blue-300">
-                              <div className="w-2 h-2 bg-blue-400 rounded-full animate-pulse"></div>
-                              <span className="text-sm">Waiting for partner to connect...</span>
-                            </div>
-                          )}
-                        </div>
-                      </div>
-
-                      <div className="text-center">
-                        <p className="text-sm text-purple-200 mb-3">
-                          Share this code with your partner to connect securely
-                        </p>
-                        <Button
-                          variant="outline"
-                          onClick={generateCode}
-                          disabled={isGenerating}
-                          className="border-white/20 text-white hover:bg-white/10"
-                        >
-                          <RefreshCw className="w-4 h-4 mr-2" />
-                          Generate New Code
-                        </Button>
-                      </div>
-                    </div>
-                  ) : (
-                    <div className="space-y-4">
-                      <p className="text-purple-100 text-sm">
-                        Generate a unique code that your partner can use to connect with you securely.
-                      </p>
-                      <Button
-                        onClick={generateCode}
-                        disabled={isGenerating}
-                        className="w-full bg-white text-purple-700 hover:bg-white/90 font-semibold py-6"
-                      >
-                        {isGenerating ? (
-                          <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                        ) : (
-                          <UserPlus className="w-5 h-5 mr-2" />
-                        )}
-                        {isGenerating ? 'Generating...' : 'Generate Pairing Code'}
-                      </Button>
-                    </div>
-                  )}
-                </TabsContent>
-
-                <TabsContent value="connect" className="space-y-4 mt-6">
-                  {connectError && (
-                    <Alert className="bg-red-500/20 border-red-400/50 text-white">
-                      <AlertDescription>{connectError}</AlertDescription>
-                    </Alert>
-                  )}
-
-                  {connectSuccess && (
-                    <Alert className="bg-green-500/20 border-green-400/50 text-white">
-                      <AlertDescription className="flex items-center">
-                        <CheckCircle className="w-4 h-4 mr-2 text-green-400" />
-                        Successfully connected! Starting secure chat...
-                      </AlertDescription>
-                    </Alert>
-                  )}
-
-                  <div className="space-y-4">
-                    <div className="space-y-2">
-                      <Label htmlFor="connectCode" className="text-white font-medium">
-                        Partner's Code
-                      </Label>
-                      <Input
-                        id="connectCode"
-                        type="text"
-                        value={connectCode}
-                        onChange={(e) => {
-                          const value = e.target.value.toUpperCase();
-                          setConnectCode(value);
-                          // Auto-submit when 6 characters are entered
-                          if (value.length === 6 && !isConnecting) {
-                            setTimeout(() => connectWithCode(), 500);
-                          }
-                        }}
-                        className="bg-white/10 border-white/20 text-white placeholder:text-purple-200 focus:border-white/40 font-mono text-center text-lg tracking-wider"
-                        placeholder="ENTER CODE"
-                        disabled={isConnecting}
-                        maxLength={6}
-                      />
-                    </div>
-
-                    <Button
-                      onClick={connectWithCode}
-                      disabled={isConnecting || !connectCode.trim()}
-                      className="w-full bg-white text-purple-700 hover:bg-white/90 font-semibold py-6"
-                    >
-                      {isConnecting ? (
-                        <Loader2 className="w-5 h-5 animate-spin mr-2" />
-                      ) : (
-                        <Users className="w-5 h-5 mr-2" />
-                      )}
-                      {isConnecting ? 'Connecting...' : 'Connect with Partner'}
-                    </Button>
-
-                    <p className="text-purple-100 text-sm text-center">
-                      Enter the 6-character code shared by your partner
-                    </p>
-                  </div>
-                </TabsContent>
-              </Tabs>
-            </CardContent>
-          </Card>
-
-          {/* Security notice */}
-          <div className="glass bg-white/5 backdrop-blur-sm rounded-xl p-4 border border-white/10">
-            <div className="flex items-start space-x-3">
-              <Shield className="w-5 h-5 text-green-400 mt-0.5" />
-              <div>
-                <p className="text-white font-medium text-sm">Secure Connection</p>
-                <p className="text-purple-200 text-xs mt-1">
-                  All communications are protected with end-to-end encryption. 
-                  Codes expire after 5 minutes for maximum security.
-                </p>
-              </div>
+    <div className="min-h-screen bg-[#F0F2F5] flex items-center justify-center p-4 font-sans text-slate-900">
+      <motion.div 
+        initial={{ opacity: 0, y: 20 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.4 }}
+        className="w-full max-w-md"
+      >
+        <Card className="bg-white border-0 shadow-xl rounded-2xl overflow-hidden">
+          <CardHeader className="text-center pb-2 bg-slate-50/50 border-b border-slate-100">
+            <div className="w-14 h-14 bg-indigo-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg shadow-indigo-200 transform rotate-3">
+              <Link className="w-7 h-7 text-white" />
             </div>
+            <CardTitle className="text-xl font-bold text-slate-800">Secure Pairing</CardTitle>
+            <CardDescription className="text-slate-500">
+              Connect devices securely to start chatting
+            </CardDescription>
+          </CardHeader>
+
+          <CardContent className="p-6">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+              <TabsList className="grid w-full grid-cols-2 bg-slate-100 p-1 rounded-xl mb-6">
+                <TabsTrigger 
+                  value="generate"
+                  className="rounded-lg data-[state=active]:bg-white data-[state=active]:text-indigo-600 data-[state=active]:shadow-sm text-slate-500 transition-all"
+                >
+                  Generate Code
+                </TabsTrigger>
+                <TabsTrigger 
+                  value="connect"
+                  className="rounded-lg data-[state=active]:bg-white data-[state=active]:text-indigo-600 data-[state=active]:shadow-sm text-slate-500 transition-all"
+                >
+                  Enter Code
+                </TabsTrigger>
+              </TabsList>
+
+              {/* GENERATE TAB */}
+              <TabsContent value="generate" className="space-y-6">
+                <AnimatePresence>
+                  {generateError && (
+                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
+                      <Alert className="bg-red-50 text-red-600 border-red-200">
+                        <AlertDescription>{generateError}</AlertDescription>
+                      </Alert>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                {generatedCode ? (
+                  <motion.div initial={{ opacity: 0, scale: 0.95 }} animate={{ opacity: 1, scale: 1 }} className="space-y-6">
+                    <div className="bg-slate-50 border border-slate-200 rounded-2xl p-6 text-center relative overflow-hidden">
+                      {/* Decorative background stripes */}
+                      <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-indigo-500 via-purple-500 to-pink-500"></div>
+                      
+                      <Label className="text-slate-400 text-xs font-bold uppercase tracking-wider block mb-2">Share this code</Label>
+                      
+                      <div className="flex items-center justify-center space-x-3 mb-4">
+                        <span className="text-4xl font-mono font-bold text-slate-800 tracking-[0.2em]">
+                          {generatedCode}
+                        </span>
+                        <button 
+                          onClick={() => navigator.clipboard.writeText(generatedCode)} 
+                          className="p-2 hover:bg-slate-200 rounded-full text-slate-500 transition-colors"
+                          title="Copy"
+                        >
+                          <Copy className="w-5 h-5" />
+                        </button>
+                      </div>
+
+                      {timeLeft > 0 ? (
+                        <div className="inline-flex items-center px-3 py-1 bg-blue-50 text-blue-600 rounded-full text-xs font-medium border border-blue-100">
+                          <Clock className="w-3 h-3 mr-1.5" />
+                          Expires in {formatTime(timeLeft)}
+                        </div>
+                      ) : (
+                        <span className="text-red-500 text-xs font-medium">Code Expired</span>
+                      )}
+                    </div>
+
+                    <div className="flex items-center justify-center space-x-2 text-indigo-600 bg-indigo-50 p-3 rounded-xl">
+                      <span className="relative flex h-3 w-3">
+                        <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75"></span>
+                        <span className="relative inline-flex rounded-full h-3 w-3 bg-indigo-500"></span>
+                      </span>
+                      <span className="text-sm font-medium">Waiting for partner...</span>
+                    </div>
+
+                    <Button variant="outline" onClick={generateCode} className="w-full border-slate-200 text-slate-600 hover:bg-slate-50">
+                      <RefreshCw className="w-4 h-4 mr-2" /> Generate New Code
+                    </Button>
+                  </motion.div>
+                ) : (
+                  <div className="text-center py-4 space-y-4">
+                    <div className="w-20 h-20 bg-slate-50 rounded-full flex items-center justify-center mx-auto text-slate-300">
+                      <Wifi className="w-10 h-10" />
+                    </div>
+                    <p className="text-slate-500 text-sm px-4">
+                      Create a temporary secure code to pair with a new device or partner.
+                    </p>
+                    <Button 
+                      onClick={generateCode} 
+                      disabled={isGenerating}
+                      className="w-full bg-indigo-600 hover:bg-indigo-700 text-white h-12 rounded-xl shadow-md hover:shadow-lg transition-all"
+                    >
+                      {isGenerating ? <Loader2 className="w-5 h-5 animate-spin" /> : "Generate Code"}
+                    </Button>
+                  </div>
+                )}
+              </TabsContent>
+
+              {/* CONNECT TAB */}
+              <TabsContent value="connect" className="space-y-5 mt-2">
+                <AnimatePresence>
+                  {connectError && (
+                    <motion.div initial={{ opacity: 0, height: 0 }} animate={{ opacity: 1, height: 'auto' }}>
+                      <Alert variant="destructive" className="bg-red-50 text-red-600 border-red-200">
+                        <AlertDescription>{connectError}</AlertDescription>
+                      </Alert>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+
+                <div className="space-y-2">
+                  <Label htmlFor="code" className="text-slate-700 font-medium">Partner's Code</Label>
+                  <Input
+                    id="code"
+                    value={connectCode}
+                    onChange={(e) => {
+                      const val = e.target.value.toUpperCase();
+                      setConnectCode(val);
+                      if (val.length === 6 && !isConnecting) setTimeout(() => connectWithCode(), 500);
+                    }}
+                    placeholder="XYZ123"
+                    className="h-14 text-center text-2xl font-mono tracking-widest uppercase bg-slate-50 border-slate-200 focus:bg-white focus:ring-2 focus:ring-indigo-500/50"
+                    maxLength={6}
+                    disabled={isConnecting}
+                  />
+                  <p className="text-xs text-slate-400 text-center">Enter the 6-character code shown on partner's screen</p>
+                </div>
+
+                <Button 
+                  onClick={connectWithCode}
+                  disabled={isConnecting || connectCode.length < 6}
+                  className="w-full bg-indigo-600 hover:bg-indigo-700 text-white h-12 rounded-xl font-semibold shadow-md transition-all disabled:opacity-50"
+                >
+                  {isConnecting ? (
+                    <div className="flex items-center"><Loader2 className="w-5 h-5 animate-spin mr-2" /> Connecting...</div>
+                  ) : (
+                    <div className="flex items-center"><Users className="w-5 h-5 mr-2" /> Connect Partner</div>
+                  )}
+                </Button>
+              </TabsContent>
+            </Tabs>
+          </CardContent>
+
+          {/* Footer Security Badge */}
+          <div className="bg-slate-50 p-4 border-t border-slate-100 flex items-center justify-center text-xs text-slate-500">
+            <ShieldCheck className="w-4 h-4 text-green-500 mr-2" />
+            <span>End-to-End Encrypted • Zero Knowledge</span>
           </div>
-        </div>
-      </div>
+        </Card>
+      </motion.div>
     </div>
   );
 }
