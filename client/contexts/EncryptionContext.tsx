@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode } from 'react';
+import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useMemo } from 'react';
 import CryptoJS from 'crypto-js';
 import {
   generateKeyPair,
@@ -9,13 +9,13 @@ import {
   KeyPair,
   EncryptedMessage,
   EncryptedFile,
-  isValidEncryptedMessage,
   isValidEncryptedFile,
   cleanEncryptedMessage,
   fileToArrayBuffer,
   createBlobUrl
 } from '../utils/crypto';
 
+// --- Types ---
 interface EncryptionContextType {
   keyPair: KeyPair | null;
   partnerPublicKey: string | null;
@@ -32,210 +32,75 @@ interface EncryptionContextType {
 
 const EncryptionContext = createContext<EncryptionContextType | undefined>(undefined);
 
-interface EncryptionProviderProps {
-  children: ReactNode;
-}
-
-export const EncryptionProvider: React.FC<EncryptionProviderProps> = ({ children }) => {
+// --- Provider ---
+export const EncryptionProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
+  // State
   const [keyPair, setKeyPair] = useState<KeyPair | null>(null);
   const [partnerPublicKey, setPartnerPublicKeyState] = useState<string | null>(null);
   const [sharedKey, setSharedKey] = useState<string | null>(null);
   const [isKeysGenerated, setIsKeysGenerated] = useState(false);
 
-  // Load keys from localStorage on mount
+  // 1. Initial Load from Storage
   useEffect(() => {
-    const savedKeyPair = localStorage.getItem('encryptionKeyPair');
-    const savedPartnerKey = localStorage.getItem('partnerPublicKey');
-    const savedSharedKey = localStorage.getItem('sharedEncryptionKey');
+    try {
+      const savedKeyPair = localStorage.getItem('encryptionKeyPair');
+      const savedPartnerKey = localStorage.getItem('partnerPublicKey');
+      const savedSharedKey = localStorage.getItem('sharedEncryptionKey');
 
-    if (savedKeyPair) {
-      try {
-        const parsedKeyPair = JSON.parse(savedKeyPair);
-        setKeyPair(parsedKeyPair);
+      if (savedKeyPair) {
+        const parsed = JSON.parse(savedKeyPair);
+        setKeyPair(parsed);
         setIsKeysGenerated(true);
-      } catch (error) {
-        console.error('Failed to load saved key pair:', error);
-        localStorage.removeItem('encryptionKeyPair');
       }
-    }
-
-    if (savedPartnerKey) {
-      setPartnerPublicKeyState(savedPartnerKey);
-    }
-
-    if (savedSharedKey) {
-      setSharedKey(savedSharedKey);
+      if (savedPartnerKey) setPartnerPublicKeyState(savedPartnerKey);
+      if (savedSharedKey) setSharedKey(savedSharedKey);
+    } catch (error) {
+      console.error('Failed to load crypto state:', error);
+      // Fallback: Clear potentially corrupted state
+      localStorage.removeItem('encryptionKeyPair');
     }
   }, []);
 
-  // Generate shared key whenever both public keys are available
+  // 2. Automatic Shared Key Generation
   useEffect(() => {
-    if (keyPair?.publicKey && partnerPublicKey && !sharedKey) {
-      console.log('🔑 Both public keys available, generating shared key...');
-      console.log('🔑 My public key length:', keyPair.publicKey.length);
-      console.log('🔑 Partner public key length:', partnerPublicKey.length);
-
-      // Create a consistent shared key by combining and hashing both public keys
+    // Only generate if we have both keys
+    if (keyPair?.publicKey && partnerPublicKey) {
       const combinedKeys = [keyPair.publicKey, partnerPublicKey].sort().join('');
       const generatedSharedKey = CryptoJS.SHA256(combinedKeys).toString();
-      setSharedKey(generatedSharedKey);
-      localStorage.setItem('sharedEncryptionKey', generatedSharedKey);
-      console.log('✅ Generated shared encryption key from public keys');
+      
+      // Only update if changed to prevent render loops
+      if (generatedSharedKey !== sharedKey) {
+        console.log('🔑 Generating new shared session key...');
+        setSharedKey(generatedSharedKey);
+        localStorage.setItem('sharedEncryptionKey', generatedSharedKey);
+      }
     }
   }, [keyPair?.publicKey, partnerPublicKey, sharedKey]);
 
-  const generateKeys = async () => {
+  // --- Actions ---
+
+  const generateKeys = useCallback(async () => {
     try {
-      console.log('Generating encryption keys...');
+      console.log('Generating new key pair...');
       const newKeyPair = await generateKeyPair();
       setKeyPair(newKeyPair);
       setIsKeysGenerated(true);
-      
-      // Save to localStorage
       localStorage.setItem('encryptionKeyPair', JSON.stringify(newKeyPair));
-      console.log('Encryption keys generated successfully');
     } catch (error) {
-      console.error('Failed to generate encryption keys:', error);
+      console.error('Key generation failed:', error);
       throw error;
     }
-  };
+  }, []);
 
-  const setPartnerPublicKey = (key: string) => {
-    console.log('🔑 setPartnerPublicKey called with key length:', key?.length);
-    console.log('🔑 Current keyPair status:', {
-      hasKeyPair: !!keyPair,
-      hasMyPublicKey: !!keyPair?.publicKey,
-      myKeyLength: keyPair?.publicKey?.length
-    });
-
-    setPartnerPublicKeyState(key);
-    localStorage.setItem('partnerPublicKey', key);
-
-    // Generate shared key from both public keys
-    if (keyPair?.publicKey && key) {
-      console.log('🔑 Generating shared key from both public keys...');
-      // Create a consistent shared key by combining and hashing both public keys
-      const combinedKeys = [keyPair.publicKey, key].sort().join('');
-      const generatedSharedKey = CryptoJS.SHA256(combinedKeys).toString();
-      setSharedKey(generatedSharedKey);
-      localStorage.setItem('sharedEncryptionKey', generatedSharedKey);
-      console.log('✅ Generated shared encryption key from public keys');
-    } else {
-      console.log('❌ Cannot generate shared key - missing keys:', {
-        hasMyKey: !!keyPair?.publicKey,
-        hasPartnerKey: !!key
-      });
+  const setPartnerPublicKey = useCallback((key: string) => {
+    if (key !== partnerPublicKey) {
+      console.log('🔑 Updating partner public key...');
+      setPartnerPublicKeyState(key);
+      localStorage.setItem('partnerPublicKey', key);
     }
-  };
+  }, [partnerPublicKey]);
 
-  const encryptForPartner = (message: string): EncryptedMessage | null => {
-    if (!sharedKey) {
-      console.error('No shared key available for encryption');
-      return null;
-    }
-
-    try {
-      console.log('🔒 Encrypting message with shared key...');
-      return encryptMessage(message, sharedKey);
-    } catch (error) {
-      console.error('Failed to encrypt message:', error);
-      return null;
-    }
-  };
-
-  const decryptFromPartner = (encryptedMessage: EncryptedMessage): string | null => {
-    console.log('🔓 Decryption attempt - Key status:', {
-      hasKeyPair: !!keyPair,
-      hasMyPublicKey: !!keyPair?.publicKey,
-      hasPartnerPublicKey: !!partnerPublicKey,
-      hasSharedKey: !!sharedKey,
-      myKeyLength: keyPair?.publicKey?.length,
-      partnerKeyLength: partnerPublicKey?.length
-    });
-
-    if (!sharedKey) {
-      console.error('❌ No shared key available for decryption');
-      console.error('🔍 Debug info:', {
-        keyPair: !!keyPair,
-        partnerPublicKey: !!partnerPublicKey,
-        sharedKey: !!sharedKey
-      });
-      return null;
-    }
-
-    // Clean and validate the encrypted message
-    const cleanedMessage = cleanEncryptedMessage(encryptedMessage);
-    if (!cleanedMessage) {
-      console.error('❌ Invalid or corrupted encrypted message format');
-      console.error('📦 Original message:', encryptedMessage);
-      return null;
-    }
-
-    console.log('🔓 Attempting to decrypt message with shared key...');
-    console.log('🔑 Shared key available:', !!sharedKey);
-    console.log('📦 Cleaned encrypted message structure:', {
-      contentLength: cleanedMessage.encryptedContent.length,
-      keyLength: cleanedMessage.encryptedKey.length,
-      ivLength: cleanedMessage.iv.length
-    });
-
-    try {
-      const result = decryptMessage(cleanedMessage, sharedKey);
-      console.log('✅ Decryption successful in EncryptionContext, result length:', result.length);
-      return result;
-    } catch (error) {
-      console.error('❌ Failed to decrypt message in EncryptionContext:', error);
-
-      // Check if this might be a key mismatch or data corruption
-      if (error.message.includes('UTF-8') || error.message.includes('malformed')) {
-        console.error('🔑 Data corruption detected - UTF-8 conversion failed');
-        console.error('🔑 This usually means wrong decryption key or corrupted data');
-      } else if (error.message.includes('key')) {
-        console.error('🔑 Key-related error - possible key mismatch');
-      } else if (error.message.includes('Base64')) {
-        console.error('📦 Base64 encoding issue - data may be corrupted');
-      }
-
-      return null;
-    }
-  };
-
-  const encryptFileForPartner = async (file: File): Promise<EncryptedFile | null> => {
-    if (!sharedKey) {
-      console.error('No shared key available for file encryption');
-      return null;
-    }
-
-    try {
-      const arrayBuffer = await fileToArrayBuffer(file);
-      return encryptFile(arrayBuffer, file.name, file.type, sharedKey);
-    } catch (error) {
-      console.error('Failed to encrypt file:', error);
-      return null;
-    }
-  };
-
-  const decryptFileFromPartner = async (encryptedFile: EncryptedFile): Promise<string | null> => {
-    if (!sharedKey) {
-      console.error('No shared key available for file decryption');
-      return null;
-    }
-
-    if (!isValidEncryptedFile(encryptedFile)) {
-      console.error('Invalid encrypted file format');
-      return null;
-    }
-
-    try {
-      const decryptedData = decryptFile(encryptedFile, sharedKey);
-      return createBlobUrl(decryptedData, encryptedFile.fileType);
-    } catch (error) {
-      console.error('Failed to decrypt file:', error);
-      return null;
-    }
-  };
-
-  const clearKeys = () => {
+  const clearKeys = useCallback(() => {
     setKeyPair(null);
     setPartnerPublicKeyState(null);
     setSharedKey(null);
@@ -243,9 +108,67 @@ export const EncryptionProvider: React.FC<EncryptionProviderProps> = ({ children
     localStorage.removeItem('encryptionKeyPair');
     localStorage.removeItem('partnerPublicKey');
     localStorage.removeItem('sharedEncryptionKey');
-  };
+  }, []);
 
-  const value: EncryptionContextType = {
+  // --- Cryptographic Operations (Memoized) ---
+
+  const encryptForPartner = useCallback((message: string): EncryptedMessage | null => {
+    if (!sharedKey) {
+      console.warn('Cannot encrypt: No shared key established');
+      return null;
+    }
+    try {
+      return encryptMessage(message, sharedKey);
+    } catch (error) {
+      console.error('Encryption error:', error);
+      return null;
+    }
+  }, [sharedKey]);
+
+  const decryptFromPartner = useCallback((encryptedMessage: EncryptedMessage): string | null => {
+    if (!sharedKey) return null;
+
+    // Validate structure first
+    const cleanedMessage = cleanEncryptedMessage(encryptedMessage);
+    if (!cleanedMessage) {
+      console.error('❌ Malformed encrypted message received');
+      return null;
+    }
+
+    try {
+      return decryptMessage(cleanedMessage, sharedKey);
+    } catch (error: any) {
+      console.error('❌ Decryption failed:', error.message || error);
+      return null; // Return null on failure instead of throwing to prevent UI crashes
+    }
+  }, [sharedKey]);
+
+  const encryptFileForPartner = useCallback(async (file: File): Promise<EncryptedFile | null> => {
+    if (!sharedKey) return null;
+    try {
+      const arrayBuffer = await fileToArrayBuffer(file);
+      return encryptFile(arrayBuffer, file.name, file.type, sharedKey);
+    } catch (error) {
+      console.error('File encryption error:', error);
+      return null;
+    }
+  }, [sharedKey]);
+
+  const decryptFileFromPartner = useCallback(async (encryptedFile: EncryptedFile): Promise<string | null> => {
+    if (!sharedKey) return null;
+    if (!isValidEncryptedFile(encryptedFile)) return null;
+
+    try {
+      const decryptedData = decryptFile(encryptedFile, sharedKey);
+      return createBlobUrl(decryptedData, encryptedFile.fileType);
+    } catch (error) {
+      console.error('File decryption error:', error);
+      return null;
+    }
+  }, [sharedKey]);
+
+  // --- Context Value ---
+  const value = useMemo<EncryptionContextType>(() => ({
     keyPair,
     partnerPublicKey,
     sharedKey,
@@ -257,7 +180,19 @@ export const EncryptionProvider: React.FC<EncryptionProviderProps> = ({ children
     encryptFileForPartner,
     decryptFileFromPartner,
     clearKeys,
-  };
+  }), [
+    keyPair, 
+    partnerPublicKey, 
+    sharedKey, 
+    isKeysGenerated, 
+    generateKeys, 
+    setPartnerPublicKey, 
+    encryptForPartner, 
+    decryptFromPartner, 
+    encryptFileForPartner, 
+    decryptFileFromPartner, 
+    clearKeys
+  ]);
 
   return (
     <EncryptionContext.Provider value={value}>
