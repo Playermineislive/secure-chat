@@ -2,521 +2,230 @@
 @tailwind components;
 @tailwind utilities;
 
-/* Performance optimizations and smooth animations */
 @layer base {
-  /* Enable hardware acceleration for better performance */
-  * {
-    -webkit-font-smoothing: antialiased;
-    -moz-osx-font-smoothing: grayscale;
-  }
-
-  /* Optimize animations with GPU acceleration */
-  .will-change-transform {
-    will-change: transform;
-    transform: translateZ(0);
-    backface-visibility: hidden;
-    perspective: 1000px;
-  }
-
-  /* Prevent iOS zoom on input focus */
-  input[type="email"],
-  input[type="password"],
-  input[type="text"] {
-    font-size: 16px;
-    -webkit-appearance: none;
-    -webkit-border-radius: 0;
-    transform: translateZ(0); /* Force GPU acceleration */
-  }
-
-  /* Improve touch target sizes for mobile */
-  @media (max-width: 768px) {
-    input, button, textarea, select {
-      min-height: 48px;
-    }
-  }
-
-  /* Better focus handling on mobile */
-  input:focus,
-  textarea:focus,
-  select:focus {
-    outline: none;
-    -webkit-tap-highlight-color: transparent;
-  }
-
-  /* Smooth keyboard transitions */
-  .touch-manipulation {
-    touch-action: manipulation;
-  }
-
-  /* Prevent viewport jumping on mobile keyboard */
-  @media screen and (max-width: 767px) {
-    body {
-      -webkit-overflow-scrolling: touch;
-      overscroll-behavior: contain;
-    }
-
-    .viewport-fixed {
-      position: fixed;
-      width: 100%;
-      height: 100%;
-      overflow: hidden;
-    }
-  }
-
-  /* Smooth scrolling for better UX */
-  html {
-    scroll-behavior: smooth;
-  }
-
-  /* Custom rounded corners for unique design */
-  .rounded-unique {
-    border-radius: 2rem 0.5rem 2rem 0.5rem;
-  }
-
-  .rounded-organic {
-    border-radius: 3rem 1rem 2rem 1.5rem;
-  }
-
-  /* High performance blur backdrop */
-  .backdrop-blur-optimized {
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    transform: translateZ(0);
-  }
-
-  /* Smooth transitions for all interactive elements */
-  button, input, [role="button"] {
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  }
-
-  /* Optimized glow effects */
-  .glow-sm {
-    box-shadow: 0 0 20px rgba(255, 255, 255, 0.1);
-    transition: box-shadow 0.3s ease;
-  }
-
-  .glow-md {
-    box-shadow: 0 0 40px rgba(255, 255, 255, 0.15);
-    transition: box-shadow 0.3s ease;
-  }
-
-  .glow-lg {
-    box-shadow: 0 0 60px rgba(255, 255, 255, 0.2);
-    transition: box-shadow 0.3s ease;
-  }
-
-  /* Reduce motion for users who prefer it */
-  @media (prefers-reduced-motion: reduce) {
-    *,
-    *::before,
-    *::after {
-      animation-duration: 0.01ms !important;
-      animation-iteration-count: 1 !important;
-      transition-duration: 0.01ms !important;
-    }
-  }
-}
-
-@layer base {
-  /**
-   * Tailwind CSS theme for secure chat application
-   * Modern glassmorphism design with gradients and animations
-   */
   :root {
-    --background: 220 15% 95%;
-    --foreground: 220 20% 10%;
+    /* --- Core Palette (HSL for Opacity Support) --- */
+    --background: 220 25% 97%;
+    --foreground: 225 15% 10%;
 
     --card: 0 0% 100%;
-    --card-foreground: 220 20% 10%;
+    --card-foreground: 225 15% 10%;
 
     --popover: 0 0% 100%;
-    --popover-foreground: 220 20% 10%;
+    --popover-foreground: 225 15% 10%;
 
-    --primary: 262 80% 60%;
+    /* Brand Color: Deep Violet/Indigo */
+    --primary: 262 80% 55%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 220 15% 85%;
-    --secondary-foreground: 220 20% 10%;
+    --secondary: 220 20% 92%;
+    --secondary-foreground: 225 15% 10%;
 
-    --muted: 220 15% 90%;
-    --muted-foreground: 220 10% 40%;
+    --muted: 220 20% 90%;
+    --muted-foreground: 220 10% 45%;
 
-    --accent: 262 80% 60%;
-    --accent-foreground: 0 0% 100%;
+    --accent: 262 80% 96%;
+    --accent-foreground: 262 80% 40%;
 
-    --destructive: 0 75% 60%;
+    --destructive: 0 85% 60%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 220 15% 85%;
-    --input: 220 15% 90%;
+    --border: 220 20% 90%;
+    --input: 220 20% 90%;
     --ring: 262 80% 60%;
 
     --radius: 1rem;
 
-    /* Chat-specific colors */
-    --chat-primary: 262 80% 60%;
-    --chat-secondary: 280 70% 65%;
-    --glass-bg: 0 0% 100%;
-    --glass-border: 220 15% 85%;
-    --message-sent: 262 80% 60%;
-    --message-received: 220 15% 85%;
+    /* --- Chat Specific --- */
+    --chat-bubble-user: 262 80% 55%;
+    --chat-bubble-user-text: 0 0% 100%;
+    
+    --chat-bubble-peer: 220 20% 94%;
+    --chat-bubble-peer-text: 225 15% 10%;
   }
 
   .dark {
-    --background: 220 20% 8%;
-    --foreground: 220 15% 90%;
+    --background: 224 25% 6%;
+    --foreground: 210 20% 98%;
 
-    --card: 220 20% 10%;
-    --card-foreground: 220 15% 90%;
+    --card: 224 25% 8%;
+    --card-foreground: 210 20% 98%;
 
-    --popover: 220 20% 10%;
-    --popover-foreground: 220 15% 90%;
+    --popover: 224 25% 8%;
+    --popover-foreground: 210 20% 98%;
 
-    --primary: 262 80% 60%;
+    /* Brand Color in Dark Mode (Slightly Lighter for Contrast) */
+    --primary: 263 75% 65%;
     --primary-foreground: 0 0% 100%;
 
-    --secondary: 220 20% 15%;
-    --secondary-foreground: 220 15% 90%;
+    --secondary: 217 20% 15%;
+    --secondary-foreground: 210 20% 98%;
 
-    --muted: 220 20% 15%;
-    --muted-foreground: 220 10% 60%;
+    --muted: 217 20% 15%;
+    --muted-foreground: 215 15% 65%;
 
-    --accent: 262 80% 60%;
-    --accent-foreground: 0 0% 100%;
+    --accent: 217 20% 15%;
+    --accent-foreground: 210 20% 98%;
 
-    --destructive: 0 75% 60%;
+    --destructive: 0 65% 55%;
     --destructive-foreground: 0 0% 100%;
 
-    --border: 220 20% 20%;
-    --input: 220 20% 15%;
-    --ring: 262 80% 60%;
-
-    /* Dark theme chat colors */
-    --chat-primary: 262 80% 60%;
-    --chat-secondary: 280 70% 65%;
-    --glass-bg: 220 20% 10%;
-    --glass-border: 220 20% 25%;
-    --message-sent: 262 80% 60%;
-    --message-received: 220 20% 15%;
+    --border: 217 20% 15%;
+    --input: 217 20% 15%;
+    --ring: 263 75% 65%;
+    
+    /* --- Chat Specific (Dark) --- */
+    --chat-bubble-user: 263 75% 65%;
+    --chat-bubble-user-text: 0 0% 100%;
+    
+    --chat-bubble-peer: 217 20% 15%;
+    --chat-bubble-peer-text: 210 20% 98%;
   }
-}
 
-@layer base {
   * {
     @apply border-border;
   }
 
+  /* Core Layout Setup */
+  html {
+    -webkit-tap-highlight-color: transparent;
+    scroll-behavior: smooth;
+  }
+
   body {
     @apply bg-background text-foreground antialiased;
-    background: linear-gradient(135deg, hsl(var(--background)) 0%, hsl(var(--muted)) 100%);
-    min-height: 100vh;
+    font-feature-settings: "rlig" 1, "calt" 1;
+    /* Prevent pull-to-refresh on mobile (optional, feels more native) */
+    overscroll-behavior-y: none; 
+  }
+
+  /* Better Heading Rendering */
+  h1, h2, h3, h4, h5, h6 {
+    text-wrap: balance;
+  }
+
+  /* Custom Selection Color */
+  ::selection {
+    @apply bg-primary/20 text-foreground;
   }
 }
 
 @layer components {
-  /* Enhanced glassmorphism effects */
+  /* --- Glassmorphism --- */
   .glass {
-    background: rgba(255, 255, 255, 0.1);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.37);
-    transition: all 0.3s ease;
+    @apply bg-white/70 dark:bg-black/40 border border-white/20 dark:border-white/10 backdrop-blur-xl shadow-sm;
   }
 
-  .glass:hover {
-    background: rgba(255, 255, 255, 0.15);
-    box-shadow: 0 12px 40px 0 rgba(31, 38, 135, 0.5);
-    transform: translateY(-2px);
+  .glass-panel {
+    @apply bg-background/80 backdrop-blur-md border border-border shadow-lg;
   }
 
-  .glass-dark {
-    background: rgba(0, 0, 0, 0.1);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.37);
+  /* --- Scrollbar Customization --- */
+  /* Firefox */
+  .custom-scrollbar {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--muted-foreground) / 0.3) transparent;
   }
 
-  /* Enhanced chat message animations */
-  .message-appear {
-    animation: messageAppear 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+  /* Webkit (Chrome/Safari/Edge) */
+  .custom-scrollbar::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
   }
 
-  .message-bubble {
-    transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  .custom-scrollbar::-webkit-scrollbar-track {
+    background: transparent;
   }
 
-  .message-bubble:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 8px 25px rgba(0, 0, 0, 0.15);
+  .custom-scrollbar::-webkit-scrollbar-thumb {
+    @apply bg-muted-foreground/30 rounded-full hover:bg-muted-foreground/50 transition-colors;
+  }
+  
+  /* Hide scrollbar but keep functionality */
+  .no-scrollbar::-webkit-scrollbar {
+    display: none;
+  }
+  .no-scrollbar {
+    -ms-overflow-style: none;
+    scrollbar-width: none;
   }
 
-  .typing-indicator {
-    animation: pulse 1.5s infinite;
+  /* --- Chat Bubbles --- */
+  .bubble-user {
+    background-color: hsl(var(--chat-bubble-user));
+    color: hsl(var(--chat-bubble-user-text));
+    border-bottom-right-radius: 4px;
   }
 
-  /* Enhanced gradient backgrounds */
-  .gradient-primary {
-    background: linear-gradient(135deg, hsl(var(--chat-primary)) 0%, hsl(var(--chat-secondary)) 100%);
-  }
-
-  .gradient-card {
-    background: linear-gradient(145deg, rgba(255, 255, 255, 0.1) 0%, rgba(255, 255, 255, 0.05) 100%);
-  }
-
-  /* Floating animation for elements */
-  .float {
-    animation: float 6s ease-in-out infinite;
-  }
-
-  .float-delayed {
-    animation: float 6s ease-in-out infinite;
-    animation-delay: 2s;
-  }
-
-  /* Shimmer effect for loading states */
-  .shimmer {
-    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.1), transparent);
-    background-size: 200% 100%;
-    animation: shimmer 2s ease-in-out infinite;
-  }
-
-  /* Glow effect */
-  .glow {
-    box-shadow: 0 0 20px rgba(139, 92, 246, 0.4);
-  }
-
-  .glow-strong {
-    box-shadow: 0 0 30px rgba(139, 92, 246, 0.6);
-  }
-
-  /* Smooth focus ring */
-  .focus-ring {
-    transition: box-shadow 0.2s ease;
-  }
-
-  .focus-ring:focus {
-    outline: none;
-    box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.3);
+  .bubble-peer {
+    background-color: hsl(var(--chat-bubble-peer));
+    color: hsl(var(--chat-bubble-peer-text));
+    border-bottom-left-radius: 4px;
   }
 }
 
 @layer utilities {
-  /* Enhanced custom animations */
-  @keyframes messageAppear {
-    0% {
-      opacity: 0;
-      transform: translateY(20px) scale(0.95);
-    }
-    100% {
-      opacity: 1;
-      transform: translateY(0) scale(1);
-    }
+  /* --- Mobile Safe Areas (iPhone Home Bar Fix) --- */
+  .pb-safe {
+    padding-bottom: env(safe-area-inset-bottom);
+  }
+  
+  .pt-safe {
+    padding-top: env(safe-area-inset-top);
+  }
+  
+  .h-safe-screen {
+    height: 100vh; /* Fallback */
+    height: 100dvh; /* Dynamic Viewport Height (Mobile Friendly) */
   }
 
-  @keyframes pulse {
-    0%, 100% {
-      opacity: 1;
-    }
-    50% {
-      opacity: 0.5;
-    }
+  /* --- Performance Optimizations --- */
+  
+  /* Use on long chat lists to prevent rendering off-screen items */
+  .contain-content {
+    contain: content; 
   }
 
-  @keyframes slideInFromRight {
-    0% {
-      transform: translateX(100%);
-      opacity: 0;
-    }
-    100% {
-      transform: translateX(0);
-      opacity: 1;
-    }
+  /* Use on elements that animate (like slide-overs) */
+  .gpu-layer {
+    transform: translateZ(0);
+    will-change: transform, opacity;
+    backface-visibility: hidden;
   }
 
-  @keyframes slideInFromLeft {
-    0% {
-      transform: translateX(-100%);
-      opacity: 0;
-    }
-    100% {
-      transform: translateX(0);
-      opacity: 1;
-    }
+  /* --- Animations --- */
+  .animate-in-up {
+    animation: fadeInUp 0.4s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   }
-
-  @keyframes float {
-    0%, 100% {
-      transform: translateY(0px) rotate(0deg);
-    }
-    50% {
-      transform: translateY(-20px) rotate(3deg);
-    }
+  
+  .animate-in-scale {
+    animation: scaleIn 0.3s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   }
-
-  @keyframes shimmer {
-    0% {
-      background-position: -200% 0;
-    }
-    100% {
-      background-position: 200% 0;
-    }
-  }
-
-  @keyframes gradientShift {
-    0%, 100% {
-      background-position: 0% 50%;
-    }
-    50% {
-      background-position: 100% 50%;
-    }
-  }
-
-  @keyframes breathe {
-    0%, 100% {
-      transform: scale(1);
-    }
-    50% {
-      transform: scale(1.05);
-    }
-  }
+  
+  /* Staggered delays */
+  .delay-100 { animation-delay: 100ms; }
+  .delay-200 { animation-delay: 200ms; }
+  .delay-300 { animation-delay: 300ms; }
 
   @keyframes fadeInUp {
-    0% {
+    from {
       opacity: 0;
-      transform: translateY(30px);
+      transform: translateY(10px);
     }
-    100% {
+    to {
       opacity: 1;
       transform: translateY(0);
     }
   }
 
   @keyframes scaleIn {
-    0% {
+    from {
       opacity: 0;
-      transform: scale(0.9);
+      transform: scale(0.96);
     }
-    100% {
+    to {
       opacity: 1;
       transform: scale(1);
-    }
-  }
-
-  @keyframes sparkle {
-    0%, 100% {
-      opacity: 0;
-      transform: scale(0) rotate(0deg);
-    }
-    50% {
-      opacity: 1;
-      transform: scale(1) rotate(180deg);
-    }
-  }
-
-  /* Animation utility classes */
-  .animate-slide-in-right {
-    animation: slideInFromRight 0.3s ease-out;
-  }
-
-  .animate-slide-in-left {
-    animation: slideInFromLeft 0.3s ease-out;
-  }
-
-  .animate-float {
-    animation: float 6s ease-in-out infinite;
-  }
-
-  .animate-shimmer {
-    animation: shimmer 2s ease-in-out infinite;
-  }
-
-  .animate-gradient {
-    background-size: 400% 400%;
-    animation: gradientShift 3s ease infinite;
-  }
-
-  .animate-breathe {
-    animation: breathe 4s ease-in-out infinite;
-  }
-
-  .animate-fade-in-up {
-    animation: fadeInUp 0.6s ease-out;
-  }
-
-  .animate-scale-in {
-    animation: scaleIn 0.4s ease-out;
-  }
-
-  .animate-sparkle {
-    animation: sparkle 2s ease-in-out infinite;
-  }
-
-  /* Enhanced hover effects */
-  .hover-lift {
-    transition: transform 0.3s ease, box-shadow 0.3s ease;
-  }
-
-  .hover-lift:hover {
-    transform: translateY(-4px);
-    box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
-  }
-
-  .hover-glow {
-    transition: box-shadow 0.3s ease;
-  }
-
-  .hover-glow:hover {
-    box-shadow: 0 0 20px rgba(139, 92, 246, 0.4);
-  }
-
-  .hover-scale {
-    transition: transform 0.2s ease;
-  }
-
-  .hover-scale:hover {
-    transform: scale(1.05);
-  }
-
-  /* Mobile-specific improvements */
-  @media (max-width: 768px) {
-    .glass {
-      backdrop-filter: blur(15px);
-      -webkit-backdrop-filter: blur(15px);
-    }
-
-    .message-appear {
-      animation-duration: 0.2s;
-    }
-
-    /* Improve touch targets on mobile */
-    button {
-      min-height: 44px;
-    }
-
-    input {
-      min-height: 44px;
-    }
-  }
-
-  /* Mobile viewport fix */
-  @supports (-webkit-touch-callout: none) {
-    .min-h-screen {
-      min-height: -webkit-fill-available;
-    }
-  }
-
-  /* Prevent horizontal scroll on mobile */
-  .prevent-horizontal-scroll {
-    overflow-x: hidden;
-    max-width: 100vw;
-  }
-
-  /* Mobile-friendly message bubbles */
-  @media (max-width: 640px) {
-    .message-bubble {
-      max-width: 85%;
     }
   }
 }
