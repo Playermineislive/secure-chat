@@ -1,4 +1,4 @@
-// Types
+// --- Types ---
 export interface KeyPair {
   publicKey: string;
   privateKey: string;
@@ -7,7 +7,6 @@ export interface KeyPair {
 export interface EncryptedMessage {
   iv: string;
   encryptedContent: string; // Base64
-  encryptedKey?: string; // For hybrid schemes (optional here since we use sharedKey)
 }
 
 export interface EncryptedFile {
@@ -18,9 +17,9 @@ export interface EncryptedFile {
   fileSize: number;
 }
 
-// --- Helpers ---
+// --- Base Utilities (Must be exported) ---
 
-const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
+export const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
   let binary = '';
   const bytes = new Uint8Array(buffer);
   const len = bytes.byteLength;
@@ -30,7 +29,7 @@ const arrayBufferToBase64 = (buffer: ArrayBuffer): string => {
   return window.btoa(binary);
 };
 
-const base64ToArrayBuffer = (base64: string): ArrayBuffer => {
+export const base64ToArrayBuffer = (base64: string): ArrayBuffer => {
   const binary_string = window.atob(base64);
   const len = binary_string.length;
   const bytes = new Uint8Array(len);
@@ -40,7 +39,7 @@ const base64ToArrayBuffer = (base64: string): ArrayBuffer => {
   return bytes.buffer;
 };
 
-const hexToArrayBuffer = (hex: string): ArrayBuffer => {
+export const hexToArrayBuffer = (hex: string): ArrayBuffer => {
   const bytes = new Uint8Array(hex.length / 2);
   for (let i = 0; i < hex.length; i += 2) {
     bytes[i / 2] = parseInt(hex.substring(i, i + 2), 16);
@@ -48,12 +47,24 @@ const hexToArrayBuffer = (hex: string): ArrayBuffer => {
   return bytes.buffer;
 };
 
+export const generateUUID = (): string => {
+  if (typeof crypto !== 'undefined' && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
+  return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+    var r = Math.random() * 16 | 0, v = c == 'x' ? r : (r & 0x3 | 0x8);
+    return v.toString(16);
+  });
+};
+
+export const sha256 = async (str: string): Promise<string> => {
+  const buffer = new TextEncoder().encode(str);
+  const hash = await window.crypto.subtle.digest('SHA-256', buffer);
+  return arrayBufferToBase64(hash);
+};
+
 // --- Key Management ---
 
-/**
- * Generates an RSA-OAEP KeyPair (Public/Private)
- * Returns them as PEM-like Base64 strings for easy storage/transmission.
- */
 export const generateKeyPair = async (): Promise<KeyPair> => {
   const keyPair = await window.crypto.subtle.generateKey(
     {
@@ -75,26 +86,35 @@ export const generateKeyPair = async (): Promise<KeyPair> => {
   };
 };
 
-/**
- * Imports a raw shared key (Hex string) for use with AES-GCM
- */
-const importSharedKey = async (sharedKeyHex: string): Promise<CryptoKey> => {
-  // SHA-256 output is 256-bit (32 bytes), perfect for AES-256
-  const keyBuffer = hexToArrayBuffer(sharedKeyHex);
+export const importPublicKey = async (pem: string): Promise<CryptoKey> => {
+  const binaryDer = base64ToArrayBuffer(pem);
   return window.crypto.subtle.importKey(
-    "raw",
-    keyBuffer,
-    "AES-GCM",
-    false,
-    ["encrypt", "decrypt"]
+    "spki",
+    binaryDer,
+    { name: "RSA-OAEP", hash: "SHA-256" },
+    true,
+    ["encrypt"]
+  );
+};
+
+export const importPrivateKey = async (pem: string): Promise<CryptoKey> => {
+  const binaryDer = base64ToArrayBuffer(pem);
+  return window.crypto.subtle.importKey(
+    "pkcs8",
+    binaryDer,
+    { name: "RSA-OAEP", hash: "SHA-256" },
+    true,
+    ["decrypt"]
   );
 };
 
 // --- Encryption/Decryption ---
 
 export const encryptMessage = async (content: string, sharedKey: string): Promise<EncryptedMessage> => {
-  const key = await importSharedKey(sharedKey);
-  const iv = window.crypto.getRandomValues(new Uint8Array(12)); // 96-bit IV for AES-GCM
+  const keyBuffer = hexToArrayBuffer(sharedKey);
+  const key = await window.crypto.subtle.importKey("raw", keyBuffer, "AES-GCM", false, ["encrypt"]);
+  
+  const iv = window.crypto.getRandomValues(new Uint8Array(12));
   const encodedContent = new TextEncoder().encode(content);
 
   const encryptedBuffer = await window.crypto.subtle.encrypt(
@@ -110,7 +130,9 @@ export const encryptMessage = async (content: string, sharedKey: string): Promis
 };
 
 export const decryptMessage = async (msg: EncryptedMessage, sharedKey: string): Promise<string> => {
-  const key = await importSharedKey(sharedKey);
+  const keyBuffer = hexToArrayBuffer(sharedKey);
+  const key = await window.crypto.subtle.importKey("raw", keyBuffer, "AES-GCM", false, ["decrypt"]);
+  
   const iv = base64ToArrayBuffer(msg.iv);
   const encryptedData = base64ToArrayBuffer(msg.encryptedContent);
 
@@ -129,7 +151,9 @@ export const encryptFile = async (
   fileType: string, 
   sharedKey: string
 ): Promise<EncryptedFile> => {
-  const key = await importSharedKey(sharedKey);
+  const keyBuffer = hexToArrayBuffer(sharedKey);
+  const key = await window.crypto.subtle.importKey("raw", keyBuffer, "AES-GCM", false, ["encrypt"]);
+  
   const iv = window.crypto.getRandomValues(new Uint8Array(12));
 
   const encryptedBuffer = await window.crypto.subtle.encrypt(
@@ -148,7 +172,9 @@ export const encryptFile = async (
 };
 
 export const decryptFile = async (file: EncryptedFile, sharedKey: string): Promise<ArrayBuffer> => {
-  const key = await importSharedKey(sharedKey);
+  const keyBuffer = hexToArrayBuffer(sharedKey);
+  const key = await window.crypto.subtle.importKey("raw", keyBuffer, "AES-GCM", false, ["decrypt"]);
+  
   const iv = base64ToArrayBuffer(file.iv);
   const encryptedData = base64ToArrayBuffer(file.encryptedData);
 
@@ -159,7 +185,7 @@ export const decryptFile = async (file: EncryptedFile, sharedKey: string): Promi
   );
 };
 
-// --- Utilities ---
+// --- Helpers ---
 
 export const fileToArrayBuffer = (file: File): Promise<ArrayBuffer> => {
   return new Promise((resolve, reject) => {
