@@ -1,8 +1,8 @@
-import React, { createContext, useContext, useState, useEffect, ReactNode, useCallback, useMemo } from 'react';
+import React, { createContext, useContext, useEffect, useReducer, useCallback, useMemo, ReactNode } from 'react';
 import { useAuth } from './AuthContext';
 import { generateInviteCode, InviteCode } from '../utils/groupCrypto';
 
-// --- Types ---
+// --- Domain Models ---
 
 export interface Contact {
   id: string;
@@ -24,6 +24,7 @@ export interface Contact {
     content: string;
     timestamp: string;
     isOwn: boolean;
+    type: 'text' | 'image' | 'file';
   };
 }
 
@@ -64,18 +65,132 @@ export interface Group {
   };
 }
 
-interface ContactContextType {
+export interface UserProfile {
+  id: string;
+  email: string;
+  username?: string;
+  avatar?: string;
+  status?: string;
+}
+
+// --- State Definition ---
+
+interface ContactState {
   contacts: Contact[];
   groups: Group[];
   pendingRequests: Contact[];
   currentInviteCode: InviteCode | null;
-  userProfile: {
-    id: string;
-    email: string;
-    username?: string;
-    avatar?: string;
-  } | null;
-  
+  userProfile: UserProfile | null;
+  isLoading: boolean;
+  error: string | null;
+}
+
+type Action =
+  | { type: 'INIT_DATA'; payload: Partial<ContactState> }
+  | { type: 'SET_LOADING'; payload: boolean }
+  | { type: 'SET_ERROR'; payload: string | null }
+  | { type: 'ADD_CONTACT'; payload: Contact }
+  | { type: 'REMOVE_CONTACT'; payload: string }
+  | { type: 'UPDATE_CONTACT'; payload: { id: string; updates: Partial<Contact> } }
+  | { type: 'SET_PROFILE'; payload: UserProfile }
+  | { type: 'UPDATE_PROFILE'; payload: Partial<UserProfile> }
+  | { type: 'ADD_GROUP'; payload: Group }
+  | { type: 'UPDATE_GROUP'; payload: { id: string; updates: Partial<Group> } }
+  | { type: 'REMOVE_GROUP'; payload: string }
+  | { type: 'SET_INVITE_CODE'; payload: InviteCode }
+  | { type: 'ADD_REQUEST'; payload: Contact }
+  | { type: 'REMOVE_REQUEST'; payload: string };
+
+const initialState: ContactState = {
+  contacts: [],
+  groups: [],
+  pendingRequests: [],
+  currentInviteCode: null,
+  userProfile: null,
+  isLoading: false,
+  error: null,
+};
+
+// --- Reducer (The Brain) ---
+
+function contactReducer(state: ContactState, action: Action): ContactState {
+  switch (action.type) {
+    case 'INIT_DATA':
+      return { ...state, ...action.payload, isLoading: false };
+    
+    case 'SET_LOADING':
+      return { ...state, isLoading: action.payload };
+    
+    case 'SET_ERROR':
+      return { ...state, error: action.payload, isLoading: false };
+
+    case 'ADD_CONTACT': {
+      // Prevent duplicates
+      if (state.contacts.some(c => c.id === action.payload.id || c.email === action.payload.email)) {
+        return state;
+      }
+      return { ...state, contacts: [...state.contacts, action.payload] };
+    }
+
+    case 'REMOVE_CONTACT':
+      return {
+        ...state,
+        contacts: state.contacts.filter(c => c.id !== action.payload),
+        // Also remove from groups if needed (optional logic)
+        groups: state.groups.map(g => ({
+          ...g,
+          members: g.members.filter(m => m.id !== action.payload)
+        }))
+      };
+
+    case 'UPDATE_CONTACT':
+      return {
+        ...state,
+        contacts: state.contacts.map(c => 
+          c.id === action.payload.id ? { ...c, ...action.payload.updates } : c
+        )
+      };
+
+    case 'SET_PROFILE':
+      return { ...state, userProfile: action.payload };
+
+    case 'UPDATE_PROFILE':
+      return state.userProfile 
+        ? { ...state, userProfile: { ...state.userProfile, ...action.payload } }
+        : state;
+
+    case 'ADD_GROUP':
+      return { ...state, groups: [...state.groups, action.payload] };
+
+    case 'UPDATE_GROUP':
+      return {
+        ...state,
+        groups: state.groups.map(g => 
+          g.id === action.payload.id ? { ...g, ...action.payload.updates } : g
+        )
+      };
+
+    case 'REMOVE_GROUP':
+      return { ...state, groups: state.groups.filter(g => g.id !== action.payload) };
+
+    case 'SET_INVITE_CODE':
+      return { ...state, currentInviteCode: action.payload };
+
+    case 'ADD_REQUEST':
+      if (state.pendingRequests.some(r => r.email === action.payload.email)) return state;
+      return { ...state, pendingRequests: [...state.pendingRequests, action.payload] };
+
+    case 'REMOVE_REQUEST':
+      return { ...state, pendingRequests: state.pendingRequests.filter(r => r.id !== action.payload) };
+
+    default:
+      return state;
+  }
+}
+
+// --- Context Definition ---
+
+interface ContactContextType extends ContactState {
   // Actions
   addContact: (contact: Contact) => void;
   removeContact: (contactId: string) => void;
@@ -108,88 +223,79 @@ interface ContactContextType {
   acceptFriendRequest: (contactId: string) => void;
   rejectFriendRequest: (contactId: string) => void;
   uploadProfilePicture: (file: File) => Promise<string | null>;
-  
-  // State
-  isLoading: boolean;
-  error: string | null;
 }
 
 const ContactContext = createContext<ContactContextType | undefined>(undefined);
 
+// --- Provider ---
+
 export const ContactProvider: React.FC<{ children: ReactNode }> = ({ children }) => {
   const { user } = useAuth();
-  
-  // --- State ---
-  const [contacts, setContacts] = useState<Contact[]>([]);
-  const [groups, setGroups] = useState<Group[]>([]);
-  const [pendingRequests, setPendingRequests] = useState<Contact[]>([]);
-  const [currentInviteCode, setCurrentInviteCode] = useState<InviteCode | null>(null);
-  const [userProfile, setUserProfile] = useState<{
-    id: string;
-    email: string;
-    username?: string;
-    avatar?: string;
-  } | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [state, dispatch] = useReducer(contactReducer, initialState);
 
-  // --- Persistence Logic ---
-
-  // Initial Load
-  useEffect(() => {
-    if (user) {
-      // Initialize profile
-      const savedProfile = localStorage.getItem('secureChat_userProfile');
-      if (savedProfile) {
-        setUserProfile({ ...JSON.parse(savedProfile), id: user.id, email: user.email });
-      } else {
-        setUserProfile({
-          id: user.id,
-          email: user.email,
-          username: user.username || user.email.split('@')[0],
-          avatar: undefined
-        });
-      }
-
-      // Load data
-      try {
-        const savedContacts = localStorage.getItem('secureChat_contacts');
-        const savedGroups = localStorage.getItem('secureChat_groups');
-        const savedRequests = localStorage.getItem('secureChat_pendingRequests');
-        
-        if (savedContacts) setContacts(JSON.parse(savedContacts));
-        if (savedGroups) setGroups(JSON.parse(savedGroups));
-        if (savedRequests) setPendingRequests(JSON.parse(savedRequests));
-      } catch (err) {
-        console.error('Failed to load local data', err);
-      }
-
-      generateInitialInviteCode();
-    }
-  }, [user]); // Only run when user changes (login)
-
-  // Debounced Save
+  // 1. Initialization & Cross-Tab Sync
   useEffect(() => {
     if (!user) return;
 
-    const timeoutId = setTimeout(() => {
-      localStorage.setItem('secureChat_contacts', JSON.stringify(contacts));
-      localStorage.setItem('secureChat_groups', JSON.stringify(groups));
-      localStorage.setItem('secureChat_pendingRequests', JSON.stringify(pendingRequests));
-      if (userProfile) {
-        localStorage.setItem('secureChat_userProfile', JSON.stringify(userProfile));
+    const loadData = () => {
+      try {
+        const storedContacts = localStorage.getItem('secureChat_contacts');
+        const storedGroups = localStorage.getItem('secureChat_groups');
+        const storedRequests = localStorage.getItem('secureChat_pendingRequests');
+        const storedProfile = localStorage.getItem('secureChat_userProfile');
+        
+        dispatch({
+          type: 'INIT_DATA',
+          payload: {
+            contacts: storedContacts ? JSON.parse(storedContacts) : [],
+            groups: storedGroups ? JSON.parse(storedGroups) : [],
+            pendingRequests: storedRequests ? JSON.parse(storedRequests) : [],
+            userProfile: storedProfile ? JSON.parse(storedProfile) : {
+              id: user.id,
+              email: user.email,
+              username: user.username || user.email.split('@')[0],
+              avatar: undefined
+            }
+          }
+        });
+      } catch (e) {
+        console.error('Failed to load storage data', e);
       }
-    }, 1000); // Save after 1 second of inactivity
+    };
 
-    return () => clearTimeout(timeoutId);
-  }, [contacts, groups, pendingRequests, userProfile, user]);
+    loadData();
+    generateInitialInviteCode();
 
-  // --- Invite Code Logic ---
+    // Sync across tabs
+    const handleStorageChange = (e: StorageEvent) => {
+      if (e.key?.startsWith('secureChat_')) {
+        loadData();
+      }
+    };
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, [user]);
+
+  // 2. Persistence (Debounced)
+  useEffect(() => {
+    if (!user) return;
+    const handler = setTimeout(() => {
+      localStorage.setItem('secureChat_contacts', JSON.stringify(state.contacts));
+      localStorage.setItem('secureChat_groups', JSON.stringify(state.groups));
+      localStorage.setItem('secureChat_pendingRequests', JSON.stringify(state.pendingRequests));
+      if (state.userProfile) {
+        localStorage.setItem('secureChat_userProfile', JSON.stringify(state.userProfile));
+      }
+    }, 500); // 500ms debounce
+    return () => clearTimeout(handler);
+  }, [state.contacts, state.groups, state.pendingRequests, state.userProfile, user]);
+
+  // --- Invite Code System ---
 
   const generateNewInviteCode = useCallback(() => {
     if (!user) return;
     const newCode = generateInviteCode('friend', user.id, { expiresInHours: 24, maxUses: 50 });
-    setCurrentInviteCode(newCode);
+    dispatch({ type: 'SET_INVITE_CODE', payload: newCode });
     localStorage.setItem('secureChat_inviteCode', JSON.stringify(newCode));
     localStorage.setItem('secureChat_inviteCodeDate', new Date().toISOString());
   }, [user]);
@@ -197,16 +303,13 @@ export const ContactProvider: React.FC<{ children: ReactNode }> = ({ children })
   const generateInitialInviteCode = useCallback(() => {
     const savedCode = localStorage.getItem('secureChat_inviteCode');
     const savedCodeDate = localStorage.getItem('secureChat_inviteCodeDate');
-    
     if (savedCode && savedCodeDate) {
-      const codeDate = new Date(savedCodeDate);
-      const hoursDiff = (new Date().getTime() - codeDate.getTime()) / (1000 * 60 * 60);
-      
+      const hoursDiff = (new Date().getTime() - new Date(savedCodeDate).getTime()) / (1000 * 60 * 60);
       if (hoursDiff < 24) {
         try {
-          setCurrentInviteCode(JSON.parse(savedCode));
+          dispatch({ type: 'SET_INVITE_CODE', payload: JSON.parse(savedCode) });
           return;
-        } catch { /* ignore invalid JSON */ }
+        } catch {}
       }
     }
     generateNewInviteCode();
@@ -214,45 +317,24 @@ export const ContactProvider: React.FC<{ children: ReactNode }> = ({ children })
 
   const forceRefreshInviteCode = useCallback(() => generateNewInviteCode(), [generateNewInviteCode]);
 
-  // Rotate code periodically
-  useEffect(() => {
-    if (!user) return;
-    const interval = setInterval(generateNewInviteCode, 24 * 60 * 60 * 1000);
-    return () => clearInterval(interval);
-  }, [user, generateNewInviteCode]);
+  // --- Actions ---
 
-  // --- Contact Actions ---
+  const addContact = useCallback((contact: Contact) => 
+    dispatch({ type: 'ADD_CONTACT', payload: { ...contact, connectionDate: new Date().toISOString() } }), []);
 
-  const addContact = useCallback((contact: Contact) => {
-    setContacts(prev => {
-      const exists = prev.some(c => c.id === contact.id || c.email === contact.email);
-      if (exists) return prev.map(c => (c.id === contact.id ? { ...c, ...contact } : c));
-      return [...prev, { ...contact, connectionDate: new Date().toISOString() }];
-    });
-  }, []);
+  const removeContact = useCallback((id: string) => 
+    dispatch({ type: 'REMOVE_CONTACT', payload: id }), []);
 
-  const removeContact = useCallback((contactId: string) => {
-    setContacts(prev => prev.filter(c => c.id !== contactId));
-    setGroups(prev => prev.map(g => ({
-      ...g,
-      members: g.members.filter(m => m.id !== contactId)
-    })));
-  }, []);
+  const updateContact = useCallback((id: string, updates: Partial<Contact>) => 
+    dispatch({ type: 'UPDATE_CONTACT', payload: { id, updates } }), []);
 
-  const updateContact = useCallback((contactId: string, updates: Partial<Contact>) => {
-    setContacts(prev => prev.map(c => (c.id === contactId ? { ...c, ...updates } : c)));
-  }, []);
+  const renameContact = useCallback((id: string, newName: string) => 
+    dispatch({ type: 'UPDATE_CONTACT', payload: { id, updates: { displayName: newName.trim() } } }), []);
 
-  const renameContact = useCallback((contactId: string, newName: string) => {
-    if (!newName.trim()) return;
-    setContacts(prev => prev.map(c => (c.id === contactId ? { ...c, displayName: newName.trim() } : c)));
-  }, []);
+  const updateUserProfile = useCallback((updates: Partial<UserProfile>) => 
+    dispatch({ type: 'UPDATE_PROFILE', payload: updates }), []);
 
-  const updateUserProfile = useCallback((updates: { username?: string; avatar?: string }) => {
-    setUserProfile(prev => (prev ? { ...prev, ...updates } : null));
-  }, []);
-
-  // --- Group Actions ---
+  // --- Group Logic ---
 
   const createGroup = useCallback((name: string, members: Contact[]): Group => {
     const currentUserId = user?.id || '';
@@ -272,20 +354,15 @@ export const ContactProvider: React.FC<{ children: ReactNode }> = ({ children })
         allowNameChange: false
       },
       members: [
-        // Admin (Self)
         {
+          ...state.userProfile,
           id: currentUserId,
-          email: user?.email || '',
-          username: userProfile?.username || user?.email || '',
-          avatar: userProfile?.avatar,
-          isOnline: true,
-          status: 'online',
-          connectionDate: new Date().toISOString(),
           role: 'admin',
           joinedAt: new Date().toISOString(),
+          isOnline: true,
+          status: 'online',
           permissions: { canInvite: true, canRemoveMembers: true, canEditGroup: true, canDeleteMessages: true }
         } as GroupMember,
-        // Other Members
         ...members.map(m => ({
           ...m,
           role: 'member' as const,
@@ -295,214 +372,159 @@ export const ContactProvider: React.FC<{ children: ReactNode }> = ({ children })
       ],
       unreadCount: 0
     };
-
-    setGroups(prev => [...prev, newGroup]);
+    dispatch({ type: 'ADD_GROUP', payload: newGroup });
     return newGroup;
-  }, [user, userProfile]);
+  }, [user, state.userProfile]);
 
-  const updateGroup = useCallback((groupId: string, updates: Partial<Group>) => {
-    setGroups(prev => prev.map(g => (g.id === groupId ? { ...g, ...updates } : g)));
-  }, []);
+  const updateGroup = useCallback((id: string, updates: Partial<Group>) => 
+    dispatch({ type: 'UPDATE_GROUP', payload: { id, updates } }), []);
 
-  const renameGroup = useCallback((groupId: string, newName: string) => {
-    if (!newName.trim()) return;
-    setGroups(prev => prev.map(g => (g.id === groupId ? { ...g, displayName: newName.trim() } : g)));
-  }, []);
+  const renameGroup = useCallback((id: string, name: string) => 
+    dispatch({ type: 'UPDATE_GROUP', payload: { id, updates: { displayName: name } } }), []);
 
+  // Simplified group helpers leveraging updateGroup
   const addGroupAdmin = useCallback((groupId: string, userId: string) => {
-    setGroups(prev => prev.map(g => {
-      if (g.id !== groupId) return g;
-      if (g.admins.includes(userId)) return g;
-      
-      return {
-        ...g,
-        admins: [...g.admins, userId],
-        members: g.members.map(m => m.id === userId ? { 
-          ...m, 
-          role: 'admin',
-          permissions: { canInvite: true, canRemoveMembers: true, canEditGroup: true, canDeleteMessages: true }
-        } : m)
-      };
-    }));
-  }, []);
+    const group = state.groups.find(g => g.id === groupId);
+    if (!group) return;
+    const newAdmins = [...group.admins, userId];
+    const newMembers = group.members.map(m => m.id === userId ? { ...m, role: 'admin' as const } : m);
+    updateGroup(groupId, { admins: newAdmins, members: newMembers });
+  }, [state.groups, updateGroup]);
 
   const removeGroupAdmin = useCallback((groupId: string, userId: string) => {
-    setGroups(prev => prev.map(g => {
-      if (g.id !== groupId) return g;
-      if (g.createdBy === userId) return g; // Cannot remove creator
-      
-      return {
-        ...g,
-        admins: g.admins.filter(id => id !== userId),
-        members: g.members.map(m => m.id === userId ? {
-          ...m,
-          role: 'member',
-          permissions: { 
-            canInvite: g.settings.allowMemberInvites, 
-            canRemoveMembers: false, 
-            canEditGroup: false, 
-            canDeleteMessages: false 
-          }
-        } : m)
-      };
-    }));
-  }, []);
+    const group = state.groups.find(g => g.id === groupId);
+    if (!group || group.createdBy === userId) return;
+    const newAdmins = group.admins.filter(a => a !== userId);
+    const newMembers = group.members.map(m => m.id === userId ? { ...m, role: 'member' as const } : m);
+    updateGroup(groupId, { admins: newAdmins, members: newMembers });
+  }, [state.groups, updateGroup]);
 
   const removeGroupMember = useCallback((groupId: string, userId: string) => {
-    setGroups(prev => prev.map(g => {
-      if (g.id !== groupId) return g;
-      return {
-        ...g,
-        members: g.members.filter(m => m.id !== userId),
-        admins: g.admins.filter(id => id !== userId)
-      };
-    }));
-  }, []);
+    const group = state.groups.find(g => g.id === groupId);
+    if (!group) return;
+    const newMembers = group.members.filter(m => m.id !== userId);
+    updateGroup(groupId, { members: newMembers });
+  }, [state.groups, updateGroup]);
 
   const updateGroupSettings = useCallback((groupId: string, settings: Partial<Group['settings']>) => {
-    setGroups(prev => prev.map(g => (g.id === groupId ? { ...g, settings: { ...g.settings, ...settings } } : g)));
-  }, []);
+    const group = state.groups.find(g => g.id === groupId);
+    if (!group) return;
+    updateGroup(groupId, { settings: { ...group.settings, ...settings } });
+  }, [state.groups, updateGroup]);
 
-  // --- Friend Request Logic ---
+  // --- Async Operations ---
 
   const addFriendByCode = useCallback(async (code: string, userInfo: { email: string; username?: string }) => {
-    setIsLoading(true);
-    setError(null);
+    dispatch({ type: 'SET_LOADING', payload: true });
     try {
       if (!/^[A-Z0-9]{6,12}$/.test(code)) throw new Error('Invalid code format');
-      if (contacts.some(c => c.email === userInfo.email)) throw new Error('User already in contacts');
-
-      // Simulating API call delay
-      await new Promise(resolve => setTimeout(resolve, 800));
-
+      if (state.contacts.some(c => c.email === userInfo.email)) throw new Error('User already in contacts');
+      
+      // Simulate API
+      await new Promise(r => setTimeout(r, 800));
+      
       const newContact: Contact = {
-        id: `contact_${Date.now()}_${Math.random().toString(36).substr(2, 5)}`,
+        id: `contact_${Date.now()}`,
         email: userInfo.email,
         username: userInfo.username || userInfo.email.split('@')[0],
         isOnline: true,
         status: 'online',
         connectionDate: new Date().toISOString(),
-        unreadCount: 0,
         isFavorite: false,
-        isPinned: false,
-        tags: ['new']
+        isPinned: false
       };
-      
-      setContacts(prev => [...prev, newContact]);
+      dispatch({ type: 'ADD_CONTACT', payload: newContact });
       return true;
     } catch (e: any) {
-      console.error(e);
-      setError(e.message || 'Failed to add friend');
+      dispatch({ type: 'SET_ERROR', payload: e.message });
       return false;
     } finally {
-      setIsLoading(false);
+      dispatch({ type: 'SET_LOADING', payload: false });
     }
-  }, [contacts]);
+  }, [state.contacts]);
 
   const sendFriendRequest = useCallback(async (email: string) => {
-    setIsLoading(true);
-    setError(null);
+    dispatch({ type: 'SET_LOADING', payload: true });
     try {
-      if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error('Invalid email');
-      if (contacts.some(c => c.email === email)) throw new Error('User already in contacts');
-      if (pendingRequests.some(r => r.email === email)) throw new Error('Request already sent');
-
-      // Simulating API
-      await new Promise(resolve => setTimeout(resolve, 600));
-
-      const pending: Contact = {
-        id: `pending_${Date.now()}`,
-        email,
-        username: email.split('@')[0],
-        isOnline: false,
-        status: 'offline',
-        connectionDate: new Date().toISOString(),
-        unreadCount: 0
-      };
-      setPendingRequests(prev => [...prev, pending]);
+      if (state.contacts.some(c => c.email === email)) throw new Error('User already added');
+      // Simulate API
+      await new Promise(r => setTimeout(r, 600));
+      dispatch({ type: 'ADD_REQUEST', payload: {
+        id: `req_${Date.now()}`, email, username: email.split('@')[0],
+        isOnline: false, status: 'offline', connectionDate: new Date().toISOString()
+      }});
       return true;
     } catch (e: any) {
-      setError(e.message);
+      dispatch({ type: 'SET_ERROR', payload: e.message });
       return false;
     } finally {
-      setIsLoading(false);
+      dispatch({ type: 'SET_LOADING', payload: false });
     }
-  }, [contacts, pendingRequests]);
+  }, [state.contacts]);
 
-  const acceptFriendRequest = useCallback((contactId: string) => {
-    const request = pendingRequests.find(r => r.id === contactId);
-    if (request) {
-      setContacts(prev => [...prev, { ...request, isOnline: true, status: 'online' }]);
-      setPendingRequests(prev => prev.filter(r => r.id !== contactId));
+  const acceptFriendRequest = useCallback((id: string) => {
+    const req = state.pendingRequests.find(r => r.id === id);
+    if (req) {
+      dispatch({ type: 'ADD_CONTACT', payload: { ...req, isOnline: true, status: 'online' } });
+      dispatch({ type: 'REMOVE_REQUEST', payload: id });
     }
-  }, [pendingRequests]);
+  }, [state.pendingRequests]);
 
-  const rejectFriendRequest = useCallback((contactId: string) => {
-    setPendingRequests(prev => prev.filter(r => r.id !== contactId));
-  }, []);
+  const rejectFriendRequest = useCallback((id: string) => 
+    dispatch({ type: 'REMOVE_REQUEST', payload: id }), []);
 
   const uploadProfilePicture = useCallback(async (file: File) => {
-    if (!file.type.startsWith('image/')) { setError('Invalid file type'); return null; }
-    if (file.size > 5 * 1024 * 1024) { setError('File too large (max 5MB)'); return null; }
-
-    setIsLoading(true);
+    dispatch({ type: 'SET_LOADING', payload: true });
     try {
+      if (file.size > 5 * 1024 * 1024) throw new Error('File too large');
       const reader = new FileReader();
       const base64 = await new Promise<string>((resolve, reject) => {
         reader.onload = () => resolve(reader.result as string);
         reader.onerror = reject;
         reader.readAsDataURL(file);
       });
-      
-      setUserProfile(prev => (prev ? { ...prev, avatar: base64 } : null));
+      dispatch({ type: 'UPDATE_PROFILE', payload: { avatar: base64 } });
       return base64;
-    } catch (e) {
-      setError('Upload failed');
+    } catch (e: any) {
+      dispatch({ type: 'SET_ERROR', payload: e.message });
       return null;
     } finally {
-      setIsLoading(false);
+      dispatch({ type: 'SET_LOADING', payload: false });
     }
   }, []);
 
-  // --- Getters ---
+  // --- Selectors (Memoized) ---
 
   const searchContacts = useCallback((query: string) => {
-    if (!query.trim()) return contacts;
+    if (!query) return state.contacts;
     const lower = query.toLowerCase();
-    return contacts.filter(c => 
+    return state.contacts.filter(c => 
       c.email.toLowerCase().includes(lower) || 
-      c.username?.toLowerCase().includes(lower) ||
-      c.displayName?.toLowerCase().includes(lower) ||
-      c.tags?.some(t => t.toLowerCase().includes(lower))
+      c.username?.toLowerCase().includes(lower) || 
+      c.displayName?.toLowerCase().includes(lower)
     );
-  }, [contacts]);
+  }, [state.contacts]);
 
-  const getFavoriteContacts = useCallback(() => contacts.filter(c => c.isFavorite), [contacts]);
-  const getOnlineContacts = useCallback(() => contacts.filter(c => c.isOnline), [contacts]);
-  
+  const getFavoriteContacts = useCallback(() => state.contacts.filter(c => c.isFavorite), [state.contacts]);
+  const getOnlineContacts = useCallback(() => state.contacts.filter(c => c.isOnline), [state.contacts]);
   const getRecentContacts = useCallback(() => {
-    const threshold = new Date(Date.now() - 24 * 60 * 60 * 1000); // 24h
-    return contacts
-      .filter(c => c.lastMessage && new Date(c.lastMessage.timestamp) > threshold)
-      .sort((a, b) => new Date(b.lastMessage!.timestamp).getTime() - new Date(a.lastMessage!.timestamp).getTime());
-  }, [contacts]);
+    return [...state.contacts].sort((a, b) => {
+      const timeA = a.lastMessage ? new Date(a.lastMessage.timestamp).getTime() : 0;
+      const timeB = b.lastMessage ? new Date(b.lastMessage.timestamp).getTime() : 0;
+      return timeB - timeA;
+    });
+  }, [state.contacts]);
 
-  // --- Context Value Memoization ---
-  const value = useMemo<ContactContextType>(() => ({
-    contacts, groups, pendingRequests, currentInviteCode, userProfile, isLoading, error,
+  // --- Output Value ---
+
+  const value = useMemo(() => ({
+    ...state,
     addContact, removeContact, updateContact, renameContact, updateUserProfile,
     createGroup, updateGroup, renameGroup, addGroupAdmin, removeGroupAdmin, removeGroupMember, updateGroupSettings,
     generateNewInviteCode, forceRefreshInviteCode, addFriendByCode,
     searchContacts, getFavoriteContacts, getOnlineContacts, getRecentContacts,
     sendFriendRequest, acceptFriendRequest, rejectFriendRequest, uploadProfilePicture
-  }), [
-    contacts, groups, pendingRequests, currentInviteCode, userProfile, isLoading, error,
-    addContact, removeContact, updateContact, renameContact, updateUserProfile,
-    createGroup, updateGroup, renameGroup, addGroupAdmin, removeGroupAdmin, removeGroupMember, updateGroupSettings,
-    generateNewInviteCode, forceRefreshInviteCode, addFriendByCode,
-    searchContacts, getFavoriteContacts, getOnlineContacts, getRecentContacts,
-    sendFriendRequest, acceptFriendRequest, rejectFriendRequest, uploadProfilePicture
-  ]);
+  }), [state, addContact, removeContact, updateContact, renameContact, updateUserProfile, createGroup, updateGroup, renameGroup, addGroupAdmin, removeGroupAdmin, removeGroupMember, updateGroupSettings, generateNewInviteCode, forceRefreshInviteCode, addFriendByCode, searchContacts, getFavoriteContacts, getOnlineContacts, getRecentContacts, sendFriendRequest, acceptFriendRequest, rejectFriendRequest, uploadProfilePicture]);
 
   return (
     <ContactContext.Provider value={value}>
@@ -511,8 +533,8 @@ export const ContactProvider: React.FC<{ children: ReactNode }> = ({ children })
   );
 };
 
-export const useContacts = (): ContactContextType => {
+export const useContacts = () => {
   const context = useContext(ContactContext);
-  if (!context) throw new Error('useContacts must be used within a ContactProvider');
+  if (!context) throw new Error('useContacts must be used within ContactProvider');
   return context;
 };
