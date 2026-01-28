@@ -1,11 +1,11 @@
 import * as React from "react";
-
 import type { ToastActionElement, ToastProps } from "@/components/ui/toast";
 
 const TOAST_LIMIT = 1;
-const TOAST_REMOVE_DELAY = 1000000;
+// 1 second delay to allow CSS exit animations to finish before removing from state
+const TOAST_REMOVE_DELAY = 1000;
 
-type ToasterToast = ToastProps & {
+export type ToasterToast = ToastProps & {
   id: string;
   title?: React.ReactNode;
   description?: React.ReactNode;
@@ -22,6 +22,9 @@ const actionTypes = {
 let count = 0;
 
 function genId() {
+  if (typeof crypto !== "undefined" && crypto.randomUUID) {
+    return crypto.randomUUID();
+  }
   count = (count + 1) % Number.MAX_SAFE_INTEGER;
   return count.toString();
 }
@@ -80,15 +83,13 @@ export const reducer = (state: State, action: Action): State => {
       return {
         ...state,
         toasts: state.toasts.map((t) =>
-          t.id === action.toast.id ? { ...t, ...action.toast } : t,
+          t.id === action.toast.id ? { ...t, ...action.toast } : t
         ),
       };
 
     case "DISMISS_TOAST": {
       const { toastId } = action;
 
-      // ! Side effects ! - This could be extracted into a dismissToast() action,
-      // but I'll keep it here for simplicity
       if (toastId) {
         addToRemoveQueue(toastId);
       } else {
@@ -105,7 +106,7 @@ export const reducer = (state: State, action: Action): State => {
                 ...t,
                 open: false,
               }
-            : t,
+            : t
         ),
       };
     }
@@ -144,6 +145,7 @@ function toast({ ...props }: Toast) {
       type: "UPDATE_TOAST",
       toast: { ...props, id },
     });
+  
   const dismiss = () => dispatch({ type: "DISMISS_TOAST", toastId: id });
 
   dispatch({
@@ -165,24 +167,30 @@ function toast({ ...props }: Toast) {
   };
 }
 
+// React 18+ store synchronization
 function useToast() {
-  const [state, setState] = React.useState<State>(memoryState);
-
-  React.useEffect(() => {
-    listeners.push(setState);
-    return () => {
-      const index = listeners.indexOf(setState);
-      if (index > -1) {
-        listeners.splice(index, 1);
-      }
-    };
-  }, [state]);
+  const state = React.useSyncExternalStore(subscribe, getSnapshot);
 
   return {
     ...state,
     toast,
     dismiss: (toastId?: string) => dispatch({ type: "DISMISS_TOAST", toastId }),
   };
+}
+
+// Helpers for useSyncExternalStore
+function subscribe(listener: (state: State) => void) {
+  listeners.push(listener);
+  return () => {
+    const index = listeners.indexOf(listener);
+    if (index > -1) {
+      listeners.splice(index, 1);
+    }
+  };
+}
+
+function getSnapshot() {
+  return memoryState;
 }
 
 export { useToast, toast };
