@@ -2,42 +2,26 @@ import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
 import { useSocket } from '../contexts/SocketContext';
-import { useEncryption } from '../contexts/EncryptionContext';
 import { useTranslation } from '../contexts/TranslationContext';
-import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardHeader } from '@/components/ui/card';
-import { Badge } from '@/components/ui/badge';
 import {
   Send,
-  Shield,
-  Users,
   LogOut,
-  Wifi,
   WifiOff,
-  MessageCircle,
   User,
   ShieldCheck,
-  AlertTriangle,
   Paperclip,
   Smile,
-  X,
-  Languages,
   Settings,
-  Globe,
-  Sparkles,
-  Zap,
+  Search,
   Phone,
   Video,
   MoreVertical,
-  Search,
-  Star,
-  Heart,
-  Coffee,
-  Music,
-  ArrowLeft
+  ArrowLeft,
+  Image as ImageIcon,
+  Check,
+  CheckCheck
 } from 'lucide-react';
-import { ChatMessage, FileUpload, MediaContent } from '@shared/api';
 import MessageBubble from '../components/MessageBubble';
 import MediaUpload from '../components/MediaUpload';
 import EmojiPicker from '../components/EmojiPicker';
@@ -61,12 +45,10 @@ export default function Chat({ partner, onDisconnect, onBack }: ChatProps) {
     isConnected,
     sendFile 
   } = useSocket();
-  // Encryption is handled in SocketContext
+  
   const { 
     isTranslationEnabled, 
-    targetLanguage, 
-    translateMessage,
-    supportedLanguages 
+    targetLanguage 
   } = useTranslation();
 
   const [newMessage, setNewMessage] = useState('');
@@ -77,14 +59,14 @@ export default function Chat({ partner, onDisconnect, onBack }: ChatProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showSearch, setShowSearch] = useState(false);
   const [messageReactions, setMessageReactions] = useState<{[key: string]: string[]}>({});
-  const [chatTheme, setChatTheme] = useState(0);
   const [showDebugPanel, setShowDebugPanel] = useState(false);
+  const [showMenu, setShowMenu] = useState(false);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const typingTimeoutRef = useRef<NodeJS.Timeout>();
 
-  // Optimized message filtering
+  // Filter messages based on search
   const filteredMessages = useMemo(() => {
     if (!searchQuery) return messages;
     return messages.filter(msg => 
@@ -93,56 +75,22 @@ export default function Chat({ partner, onDisconnect, onBack }: ChatProps) {
     );
   }, [messages, searchQuery]);
 
-  // Chat themes for unique design
-  const chatThemes = [
-    {
-      name: "Ocean Breeze",
-      bg: "linear-gradient(135deg, #667eea 0%, #764ba2 100%)",
-      messageUser: "from-blue-500 to-purple-600",
-      messagePartner: "from-gray-600 to-gray-700"
-    },
-    {
-      name: "Sunset Glow",
-      bg: "linear-gradient(135deg, #f093fb 0%, #f5576c 100%)",
-      messageUser: "from-pink-500 to-rose-600",
-      messagePartner: "from-gray-600 to-gray-700"
-    },
-    {
-      name: "Forest Night",
-      bg: "linear-gradient(135deg, #134e5e 0%, #71b280 100%)",
-      messageUser: "from-green-500 to-emerald-600",
-      messagePartner: "from-gray-600 to-gray-700"
-    }
-  ];
-
-  const currentTheme = chatThemes[chatTheme];
-
+  // Scroll to bottom
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [messages]);
-
-  useEffect(() => {
-    // Auto-cycle chat themes
-    const themeInterval = setInterval(() => {
-      setChatTheme(prev => (prev + 1) % chatThemes.length);
-    }, 30000);
-
-    return () => clearInterval(themeInterval);
-  }, [chatThemes.length]);
+  }, [messages, partnerTyping]);
 
   const handleSendMessage = useCallback(async () => {
     if (!newMessage.trim()) return;
-
     try {
-      // For now, send messages as plain text since encryption is handled in SocketContext
-      // The SocketContext will handle encryption with available keys
       sendMessage(newMessage, 'text');
       setNewMessage('');
       setIsTyping(false);
+      sendTyping(false);
     } catch (error) {
       console.error('Failed to send message:', error);
     }
-  }, [newMessage, sendMessage]);
+  }, [newMessage, sendMessage, sendTyping]);
 
   const handleTyping = useCallback((value: string) => {
     setNewMessage(value);
@@ -175,422 +123,357 @@ export default function Chat({ partner, onDisconnect, onBack }: ChatProps) {
     }));
   }, []);
 
-  const quickActions = [
-    { icon: Phone, label: "Voice Call", action: () => console.log('Voice call') },
-    { icon: Video, label: "Video Call", action: () => console.log('Video call') },
-    { icon: Search, label: "Search", action: () => setShowSearch(!showSearch) },
-    { icon: Settings, label: "Settings", action: () => setShowTranslationSettings(true) },
-    { icon: AlertTriangle, label: "Debug", action: () => setShowDebugPanel(true) }
-  ];
-
-  const quickReactions = ['❤️', '😊', '👍', '😂', '😮', '😢'];
-
   return (
-    <div className="h-screen flex flex-col relative overflow-hidden">
-      {/* Animated background */}
-      <motion.div 
-        className="absolute inset-0"
-        style={{ background: currentTheme.bg }}
-        animate={{ opacity: [0.8, 1, 0.8] }}
-        transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-      />
+    <div className="flex flex-col h-screen bg-[#F0F2F5] font-sans text-slate-900 relative">
       
-      {/* Floating elements for ambiance */}
-      <div className="absolute inset-0 pointer-events-none">
-        {[...Array(4)].map((_, i) => (
-          <motion.div
-            key={i}
-            className={`absolute w-4 h-4 rounded-full bg-white/10 backdrop-blur-sm`}
-            style={{
-              left: `${Math.random() * 100}%`,
-              top: `${Math.random() * 100}%`
-            }}
-            animate={{
-              y: [0, -20, 0],
-              opacity: [0.3, 0.8, 0.3],
-              scale: [0.8, 1.2, 0.8]
-            }}
-            transition={{
-              duration: 6 + i * 2,
-              repeat: Infinity,
-              ease: "easeInOut"
-            }}
-          />
-        ))}
-      </div>
-
-      {/* Header */}
+      {/* --- APP BAR (Material Style) --- */}
       <motion.header 
-        className="relative z-10 bg-white/10 backdrop-blur-xl border-b border-white/20"
-        initial={{ y: -50, opacity: 0 }}
+        className="bg-white px-4 py-3 shadow-sm z-20 flex items-center justify-between sticky top-0"
+        initial={{ y: -20, opacity: 0 }}
         animate={{ y: 0, opacity: 1 }}
-        transition={{ duration: 0.5 }}
       >
-        <div className="flex items-center justify-between p-4">
-          <div className="flex items-center space-x-4">
-            {onBack && (
-              <motion.button
-                onClick={onBack}
-                className="w-10 h-10 bg-white/10 hover:bg-white/20 rounded-[1rem] flex items-center justify-center text-white/70 hover:text-white transition-all duration-200 backdrop-blur-sm"
-                whileHover={{ scale: 1.1, x: -2 }}
-                whileTap={{ scale: 0.9 }}
-                title="Back to Contacts"
-              >
-                <ArrowLeft className="w-5 h-5" />
-              </motion.button>
+        <div className="flex items-center space-x-3">
+          {onBack && (
+            <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-full transition-colors text-slate-600">
+              <ArrowLeft className="w-5 h-5" />
+            </button>
+          )}
+          
+          <div className="relative">
+            <div className="w-10 h-10 rounded-full bg-indigo-100 flex items-center justify-center border border-indigo-50">
+              <User className="w-6 h-6 text-indigo-600" />
+            </div>
+            {partnerOnline && (
+              <span className="absolute bottom-0 right-0 w-3 h-3 bg-green-500 border-2 border-white rounded-full"></span>
             )}
-            <motion.div 
-              className="relative"
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-            >
-              <div className="w-12 h-12 bg-gradient-to-br from-white/20 to-white/10 rounded-[1.5rem] flex items-center justify-center border border-white/20">
-                <User className="w-6 h-6 text-white" />
-              </div>
-              {partnerOnline && (
-                <motion.div 
-                  className="absolute -bottom-1 -right-1 w-4 h-4 bg-green-500 rounded-full border-2 border-white"
-                  animate={{ scale: [1, 1.2, 1] }}
-                  transition={{ duration: 2, repeat: Infinity }}
-                />
-              )}
-            </motion.div>
-            
-            <div>
-              <h2 className="text-white font-semibold text-lg">{partner.email}</h2>
-              <div className="flex items-center space-x-2">
-                <motion.div 
-                  className={`w-2 h-2 rounded-full ${partnerOnline ? 'bg-green-400' : 'bg-gray-400'}`}
-                  animate={partnerOnline ? { opacity: [0.5, 1, 0.5] } : {}}
-                  transition={{ duration: 2, repeat: Infinity }}
-                />
-                <span className="text-white/70 text-sm">
-                  {partnerOnline ? 'Online' : 'Offline'}
-                  {partnerTyping && ' • typing...'}
-                </span>
-              </div>
+          </div>
+
+          <div className="flex flex-col">
+            <h2 className="font-semibold text-slate-800 text-sm leading-tight">{partner.email}</h2>
+            <div className="flex items-center text-xs text-slate-500">
+               {partnerTyping ? (
+                 <span className="text-indigo-600 font-medium animate-pulse">typing...</span>
+               ) : partnerOnline ? (
+                 <span>Online</span>
+               ) : (
+                 <span>Last seen recently</span>
+               )}
             </div>
           </div>
-
-          <div className="flex items-center space-x-2">
-            {quickActions.map((action, index) => (
-              <motion.button
-                key={index}
-                onClick={action.action}
-                className="w-10 h-10 bg-white/10 hover:bg-white/20 rounded-[1rem] flex items-center justify-center text-white/70 hover:text-white transition-all duration-200 backdrop-blur-sm"
-                whileHover={{ scale: 1.1, y: -2 }}
-                whileTap={{ scale: 0.9 }}
-                title={action.label}
-              >
-                <action.icon className="w-5 h-5" />
-              </motion.button>
-            ))}
-            
-            <motion.button
-              onClick={onDisconnect}
-              className="w-10 h-10 bg-red-500/20 hover:bg-red-500/30 rounded-[1rem] flex items-center justify-center text-red-300 hover:text-red-200 transition-all duration-200 backdrop-blur-sm"
-              whileHover={{ scale: 1.1, y: -2 }}
-              whileTap={{ scale: 0.9 }}
-            >
-              <LogOut className="w-5 h-5" />
-            </motion.button>
-          </div>
         </div>
 
-        {/* Search bar */}
-        <AnimatePresence>
-          {showSearch && (
-            <motion.div
-              className="px-4 pb-4"
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
-              exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.3 }}
-            >
-              <Input
-                placeholder="Search messages..."
-                value={searchQuery}
-                onChange={(e) => setSearchQuery(e.target.value)}
-                className="bg-white/10 border-white/20 text-white placeholder:text-white/60 rounded-[1.5rem] backdrop-blur-sm"
-              />
-            </motion.div>
-          )}
-        </AnimatePresence>
+        <div className="flex items-center space-x-1">
+          {/* Quick Actions Toolbar */}
+          <div className="hidden md:flex items-center space-x-1 mr-2">
+             <button className="p-2 text-slate-600 hover:bg-slate-100 rounded-full transition-colors" title="Voice Call">
+               <Phone className="w-5 h-5" />
+             </button>
+             <button className="p-2 text-slate-600 hover:bg-slate-100 rounded-full transition-colors" title="Video Call">
+               <Video className="w-5 h-5" />
+             </button>
+             <button 
+               onClick={() => setShowSearch(!showSearch)}
+               className={`p-2 rounded-full transition-colors ${showSearch ? 'bg-indigo-50 text-indigo-600' : 'text-slate-600 hover:bg-slate-100'}`} 
+             >
+               <Search className="w-5 h-5" />
+             </button>
+          </div>
 
-        {/* Theme indicator */}
-        <motion.div 
-          className="absolute top-4 left-1/2 transform -translate-x-1/2 px-3 py-1 bg-white/10 rounded-[1rem] backdrop-blur-sm"
-          animate={{ y: [0, -2, 0] }}
-          transition={{ duration: 3, repeat: Infinity }}
-        >
-          <span className="text-white/80 text-xs font-medium">{currentTheme.name}</span>
-        </motion.div>
+          <button 
+            onClick={() => setShowTranslationSettings(true)}
+            className={`p-2 rounded-full transition-colors ${isTranslationEnabled ? 'text-indigo-600 bg-indigo-50' : 'text-slate-600 hover:bg-slate-100'}`}
+            title="Translation Settings"
+          >
+            <Settings className="w-5 h-5" />
+          </button>
+          
+          <div className="relative">
+             <button 
+               onClick={() => setShowMenu(!showMenu)}
+               className="p-2 text-slate-600 hover:bg-slate-100 rounded-full transition-colors"
+             >
+               <MoreVertical className="w-5 h-5" />
+             </button>
+             
+             <AnimatePresence>
+               {showMenu && (
+                 <motion.div 
+                   initial={{ opacity: 0, scale: 0.95 }}
+                   animate={{ opacity: 1, scale: 1 }}
+                   exit={{ opacity: 0, scale: 0.95 }}
+                   className="absolute right-0 top-12 w-48 bg-white rounded-lg shadow-xl border border-slate-100 py-1 z-50 origin-top-right"
+                 >
+                    <button onClick={() => setShowDebugPanel(true)} className="w-full text-left px-4 py-2 text-sm text-slate-700 hover:bg-slate-50">Debug Console</button>
+                    <button onClick={onDisconnect} className="w-full text-left px-4 py-2 text-sm text-red-600 hover:bg-red-50 flex items-center">
+                      <LogOut className="w-4 h-4 mr-2" /> End Session
+                    </button>
+                 </motion.div>
+               )}
+             </AnimatePresence>
+          </div>
+        </div>
       </motion.header>
 
-      {/* Messages */}
-      <div className="flex-1 overflow-y-auto p-4 space-y-4 relative z-10 scrollbar-hide">
-        <AnimatePresence mode="popLayout">
-          {filteredMessages.map((message, index) => (
-            <motion.div
-              key={`${message.id}-${index}`}
-              className={`flex ${message.senderEmail === user?.email ? 'justify-end' : 'justify-start'}`}
-              initial={{ opacity: 0, y: 20, scale: 0.8 }}
-              animate={{ opacity: 1, y: 0, scale: 1 }}
-              exit={{ opacity: 0, y: -20, scale: 0.8 }}
-              transition={{ 
-                duration: 0.3, 
-                delay: index * 0.05,
-                type: "spring",
-                bounce: 0.3
-              }}
-              layout
-            >
-              <div className="max-w-xs lg:max-w-md relative group">
-                <motion.div
-                  className={`p-4 rounded-[2rem] backdrop-blur-sm border border-white/20 relative overflow-hidden ${
-                    message.senderEmail === user?.email
-                      ? `bg-gradient-to-br ${currentTheme.messageUser} text-white`
-                      : `bg-gradient-to-br ${currentTheme.messagePartner} text-white`
-                  }`}
-                  whileHover={{ scale: 1.02, y: -2 }}
-                  transition={{ duration: 0.2 }}
-                >
-                  {/* Message shimmer effect */}
-                  <motion.div
-                    className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent"
-                    animate={{
-                      x: [-100, 100],
-                      opacity: [0, 1, 0]
-                    }}
-                    transition={{
-                      duration: 3,
-                      repeat: Infinity,
-                      ease: "easeInOut"
-                    }}
-                  />
-                  
-                  <MessageBubble 
-                    message={message} 
-                    isOwn={message.senderEmail === user?.email}
-                    onReact={(emoji) => addReaction(message.id, emoji)}
-                  />
-                  
-                  {/* Message reactions */}
-                  {messageReactions[message.id] && (
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {messageReactions[message.id].map((reaction, i) => (
-                        <motion.span
-                          key={i}
-                          className="text-sm bg-white/20 rounded-full px-2 py-1"
-                          initial={{ scale: 0 }}
-                          animate={{ scale: 1 }}
-                          transition={{ delay: i * 0.1 }}
-                        >
-                          {reaction}
-                        </motion.span>
-                      ))}
-                    </div>
-                  )}
-                </motion.div>
-
-                {/* Quick reactions on hover */}
-                <motion.div
-                  className="absolute -top-8 left-1/2 transform -translate-x-1/2 flex space-x-1 opacity-0 group-hover:opacity-100 transition-opacity duration-200"
-                  initial={{ y: 10 }}
-                  whileHover={{ y: 0 }}
-                >
-                  {quickReactions.map((emoji, i) => (
-                    <motion.button
-                      key={i}
-                      onClick={() => addReaction(message.id, emoji)}
-                      className="w-8 h-8 bg-white/10 backdrop-blur-md rounded-full flex items-center justify-center hover:bg-white/20 transition-all duration-200"
-                      whileHover={{ scale: 1.2 }}
-                      whileTap={{ scale: 0.9 }}
-                    >
-                      <span className="text-sm">{emoji}</span>
-                    </motion.button>
-                  ))}
-                </motion.div>
-              </div>
-            </motion.div>
-          ))}
-        </AnimatePresence>
-        
-        {/* Typing indicator */}
-        <AnimatePresence>
-          {partnerTyping && (
-            <motion.div
-              className="flex justify-start"
-              initial={{ opacity: 0, y: 20 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -20 }}
-            >
-              <div className="bg-white/10 backdrop-blur-sm rounded-[2rem] px-4 py-3 border border-white/20">
-                <div className="flex space-x-1">
-                  {[...Array(3)].map((_, i) => (
-                    <motion.div
-                      key={i}
-                      className="w-2 h-2 bg-white/60 rounded-full"
-                      animate={{ y: [0, -4, 0] }}
-                      transition={{
-                        duration: 0.6,
-                        repeat: Infinity,
-                        delay: i * 0.2
-                      }}
-                    />
-                  ))}
-                </div>
-              </div>
-            </motion.div>
-          )}
-        </AnimatePresence>
-        
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* Input section */}
-      <motion.div 
-        className="relative z-10 p-4 bg-white/5 backdrop-blur-xl border-t border-white/20"
-        initial={{ y: 50, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ duration: 0.5, delay: 0.2 }}
-      >
-        <div className="flex items-end space-x-3">
-          <div className="flex space-x-2">
-            <motion.button
-              onClick={() => setShowMediaUpload(true)}
-              className="w-12 h-12 bg-white/10 hover:bg-white/20 rounded-[1.5rem] flex items-center justify-center text-white/70 hover:text-white transition-all duration-200 backdrop-blur-sm"
-              whileHover={{ scale: 1.1, rotate: 5 }}
-              whileTap={{ scale: 0.9 }}
-            >
-              <Paperclip className="w-5 h-5" />
-            </motion.button>
-            
-            <motion.button
-              onClick={() => setShowEmojiPicker(!showEmojiPicker)}
-              className="w-12 h-12 bg-white/10 hover:bg-white/20 rounded-[1.5rem] flex items-center justify-center text-white/70 hover:text-white transition-all duration-200 backdrop-blur-sm"
-              whileHover={{ scale: 1.1, rotate: -5 }}
-              whileTap={{ scale: 0.9 }}
-            >
-              <Smile className="w-5 h-5" />
-            </motion.button>
-          </div>
-          
-          <div className="flex-1 relative">
-            <Input
-              ref={inputRef}
-              value={newMessage}
-              onChange={(e) => handleTyping(e.target.value)}
-              onKeyPress={(e) => e.key === 'Enter' && handleSendMessage()}
-              placeholder="Type a message..."
-              className="bg-white/10 border-white/20 text-white placeholder:text-white/60 rounded-[2rem] pr-12 h-12 backdrop-blur-sm focus:ring-2 focus:ring-white/30 transition-all duration-200"
-              disabled={!isConnected}
-              style={{ fontSize: '16px' }}
-            />
-            
-            {isTranslationEnabled && (
-              <motion.div 
-                className="absolute right-12 top-1/2 transform -translate-y-1/2"
-                animate={{ rotate: [0, 360] }}
-                transition={{ duration: 4, repeat: Infinity, ease: "linear" }}
-              >
-                <Languages className="w-4 h-4 text-white/60" />
-              </motion.div>
-            )}
-          </div>
-          
-          <motion.button
-            onClick={handleSendMessage}
-            disabled={!newMessage.trim() || !isConnected}
-            className="w-12 h-12 bg-gradient-to-br from-blue-500 to-purple-600 hover:from-blue-600 hover:to-purple-700 disabled:from-gray-500 disabled:to-gray-600 rounded-[1.5rem] flex items-center justify-center text-white transition-all duration-200 backdrop-blur-sm disabled:opacity-50 disabled:cursor-not-allowed shadow-lg"
-            whileHover={{ scale: 1.1, rotate: 5 }}
-            whileTap={{ scale: 0.9 }}
-          >
-            <Send className="w-5 h-5" />
-          </motion.button>
-        </div>
-
-        {/* Connection status */}
-        <AnimatePresence>
-          {!isConnected && (
-            <motion.div
-              className="mt-3 flex items-center justify-center space-x-2 text-red-300 text-sm"
-              initial={{ opacity: 0, y: 10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-            >
-              <WifiOff className="w-4 h-4" />
-              <span>Connection lost. Reconnecting...</span>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </motion.div>
-
-      {/* Emoji Picker */}
+      {/* --- SEARCH BAR (Collapsible) --- */}
       <AnimatePresence>
-        {showEmojiPicker && (
+        {showSearch && (
           <motion.div
-            className="absolute bottom-20 left-4 z-50"
-            initial={{ opacity: 0, scale: 0.8, y: 20 }}
-            animate={{ opacity: 1, scale: 1, y: 0 }}
-            exit={{ opacity: 0, scale: 0.8, y: 20 }}
-            transition={{ duration: 0.3, type: "spring" }}
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="bg-white border-b border-slate-200 overflow-hidden"
           >
-            <EmojiPicker
-              onEmojiSelect={(emoji) => {
-                setNewMessage(prev => prev + emoji);
-                setShowEmojiPicker(false);
-              }}
-              onClose={() => setShowEmojiPicker(false)}
-            />
+            <div className="p-3">
+              <div className="relative">
+                <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                <input
+                  type="text"
+                  placeholder="Search in conversation..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  className="w-full bg-slate-100 text-slate-800 text-sm rounded-lg pl-9 pr-4 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/50"
+                  autoFocus
+                />
+                <button onClick={() => {setSearchQuery(''); setShowSearch(false)}} className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600">
+                  <span className="text-xs font-bold">✕</span>
+                </button>
+              </div>
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Media Upload */}
+      {/* --- CHAT AREA --- */}
+      <div 
+        className="flex-1 overflow-y-auto p-4 space-y-2 relative"
+        style={{ backgroundImage: 'radial-gradient(#cbd5e1 1px, transparent 1px)', backgroundSize: '20px 20px' }}
+      >
+        {/* Encryption Banner */}
+        <div className="flex justify-center mb-6">
+          <div className="bg-[#FFF8C5] text-[#7A6000] text-xs px-3 py-1.5 rounded-lg shadow-sm border border-[#FFEBA3] flex items-center">
+            <ShieldCheck className="w-3 h-3 mr-1.5" />
+            Messages are end-to-end encrypted. No one outside of this chat, not even SecureChat, can read them.
+          </div>
+        </div>
+
+        <AnimatePresence initial={false}>
+          {filteredMessages.map((message, index) => {
+            const isOwn = message.senderEmail === user?.email;
+            
+            return (
+              <motion.div
+                key={message.id}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                layout
+                className={`flex ${isOwn ? 'justify-end' : 'justify-start'} group mb-1`}
+              >
+                <div className={`max-w-[85%] md:max-w-[70%] relative`}>
+                  
+                  {/* Message Bubble */}
+                  <div className={`
+                    relative px-4 py-2 shadow-sm text-[15px] leading-relaxed break-words
+                    ${isOwn 
+                      ? 'bg-indigo-600 text-white rounded-2xl rounded-tr-sm' 
+                      : 'bg-white text-slate-800 rounded-2xl rounded-tl-sm border border-slate-100'
+                    }
+                  `}>
+                    <MessageBubble 
+                      message={message} 
+                      isOwn={isOwn}
+                      onReact={(emoji) => addReaction(message.id, emoji)}
+                    />
+                    
+                    {/* Time & Status */}
+                    <div className={`text-[10px] flex justify-end items-center gap-1 mt-1 ${isOwn ? 'text-indigo-200' : 'text-slate-400'}`}>
+                      {new Date(message.timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      {isOwn && <CheckCheck className="w-3 h-3" />}
+                    </div>
+                  </div>
+
+                  {/* Reactions Display */}
+                  {messageReactions[message.id] && (
+                    <div className={`absolute -bottom-2 ${isOwn ? 'left-0' : 'right-0'} flex gap-0.5`}>
+                      {messageReactions[message.id].map((emoji, i) => (
+                        <motion.div 
+                          key={i} 
+                          initial={{ scale: 0 }} 
+                          animate={{ scale: 1 }}
+                          className="bg-white border border-slate-200 rounded-full px-1.5 py-0.5 text-xs shadow-sm"
+                        >
+                          {emoji}
+                        </motion.div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Hover Actions */}
+                  <div className={`
+                    absolute top-1/2 -translate-y-1/2 opacity-0 group-hover:opacity-100 transition-opacity
+                    ${isOwn ? '-left-12' : '-right-12'}
+                  `}>
+                    <button 
+                      onClick={() => addReaction(message.id, '👍')}
+                      className="p-1.5 bg-slate-200 hover:bg-slate-300 rounded-full text-slate-600"
+                    >
+                      <Smile className="w-4 h-4" />
+                    </button>
+                  </div>
+                </div>
+              </motion.div>
+            );
+          })}
+        </AnimatePresence>
+
+        {/* Typing Indicator */}
+        {partnerTyping && (
+           <motion.div initial={{ opacity: 0, y: 10 }} animate={{ opacity: 1, y: 0 }} className="flex justify-start">
+             <div className="bg-white border border-slate-100 rounded-2xl rounded-tl-sm py-3 px-4 shadow-sm flex space-x-1 items-center">
+               <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.3s]"></div>
+               <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce [animation-delay:-0.15s]"></div>
+               <div className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce"></div>
+             </div>
+           </motion.div>
+        )}
+
+        <div ref={messagesEndRef} />
+      </div>
+
+      {/* --- INPUT AREA --- */}
+      <div className="bg-white px-4 py-3 border-t border-slate-200 z-20">
+        <div className="max-w-4xl mx-auto flex items-end space-x-2">
+          
+          {/* Attachments */}
+          <div className="flex pb-2">
+            <button 
+              onClick={() => setShowMediaUpload(true)}
+              className="p-2 text-slate-500 hover:bg-slate-100 rounded-full transition-colors"
+            >
+              <Paperclip className="w-5 h-5" />
+            </button>
+            <button 
+              onClick={() => setShowMediaUpload(true)}
+              className="hidden sm:block p-2 text-slate-500 hover:bg-slate-100 rounded-full transition-colors"
+            >
+              <ImageIcon className="w-5 h-5" />
+            </button>
+          </div>
+
+          {/* Text Input */}
+          <div className="flex-1 relative bg-slate-100 rounded-2xl border-transparent focus-within:bg-white focus-within:ring-2 focus-within:ring-indigo-500 focus-within:border-transparent transition-all">
+             <textarea
+               ref={inputRef as any}
+               value={newMessage}
+               onChange={(e) => setNewMessage(e.target.value)}
+               onKeyDown={(e) => {
+                 if (e.key === 'Enter' && !e.shiftKey) {
+                   e.preventDefault();
+                   handleSendMessage();
+                 } else {
+                   handleTyping(e.currentTarget.value);
+                 }
+               }}
+               placeholder="Type a message..."
+               className="w-full bg-transparent border-none focus:ring-0 text-slate-800 placeholder:text-slate-400 resize-none py-3 pl-4 pr-10 max-h-32 min-h-[44px]"
+               rows={1}
+               disabled={!isConnected}
+             />
+             
+             {/* Emoji Button inside Input */}
+             <button 
+               onClick={() => setShowEmojiPicker(!showEmojiPicker)}
+               className="absolute right-2 bottom-2 p-1.5 text-slate-400 hover:text-indigo-600 transition-colors"
+             >
+               <Smile className="w-5 h-5" />
+             </button>
+          </div>
+
+          {/* Send Button */}
+          <button
+            onClick={handleSendMessage}
+            disabled={!newMessage.trim() || !isConnected}
+            className={`
+              p-3 rounded-full shadow-sm transition-all flex items-center justify-center mb-1
+              ${newMessage.trim() && isConnected 
+                ? 'bg-indigo-600 text-white hover:bg-indigo-700 hover:shadow-md' 
+                : 'bg-slate-200 text-slate-400 cursor-not-allowed'}
+            `}
+          >
+            <Send className="w-5 h-5 ml-0.5" />
+          </button>
+        </div>
+
+        {/* Connection Warning */}
+        {!isConnected && (
+           <div className="text-center mt-2 flex items-center justify-center text-xs text-red-500 font-medium">
+             <WifiOff className="w-3 h-3 mr-1" /> Reconnecting...
+           </div>
+        )}
+      </div>
+
+      {/* --- MODALS & OVERLAYS --- */}
+      
+      {/* Emoji Picker Popover */}
+      <AnimatePresence>
+        {showEmojiPicker && (
+          <motion.div
+            initial={{ opacity: 0, y: 20, scale: 0.95 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 20, scale: 0.95 }}
+            className="absolute bottom-20 right-4 md:right-auto md:left-20 z-50 shadow-2xl rounded-xl"
+          >
+            <div className="bg-white rounded-xl overflow-hidden border border-slate-200">
+               <EmojiPicker
+                 onEmojiSelect={(emoji) => {
+                   setNewMessage(prev => prev + emoji);
+                 }}
+                 onClose={() => setShowEmojiPicker(false)}
+               />
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Translation Settings Modal */}
+      <AnimatePresence>
+        {showTranslationSettings && (
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/40 backdrop-blur-sm p-4">
+             <motion.div 
+               initial={{ opacity: 0, scale: 0.9 }}
+               animate={{ opacity: 1, scale: 1 }}
+               exit={{ opacity: 0, scale: 0.9 }}
+               className="bg-white rounded-2xl shadow-2xl w-full max-w-md overflow-hidden"
+             >
+               <div className="p-4 border-b border-slate-100 flex justify-between items-center bg-indigo-50">
+                 <h3 className="font-semibold text-slate-800 flex items-center">
+                   <Settings className="w-4 h-4 mr-2 text-indigo-600" /> Translation Settings
+                 </h3>
+                 <button onClick={() => setShowTranslationSettings(false)} className="text-slate-500 hover:text-slate-800">✕</button>
+               </div>
+               <div className="p-4">
+                 <TranslationSettings onClose={() => setShowTranslationSettings(false)} />
+               </div>
+             </motion.div>
+          </div>
+        )}
+      </AnimatePresence>
+
+      {/* Media Upload Modal */}
       <AnimatePresence>
         {showMediaUpload && (
-          <motion.div
-            className="absolute inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
+          <div className="absolute inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4">
             <motion.div
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.8, opacity: 0 }}
-              transition={{ duration: 0.3, type: "spring" }}
+              initial={{ opacity: 0, y: 20 }}
+              animate={{ opacity: 1, y: 0 }}
+              exit={{ opacity: 0, y: 20 }}
+              className="bg-white rounded-2xl shadow-xl w-full max-w-lg"
             >
               <MediaUpload
                 onFileSelect={handleFileUpload}
                 onClose={() => setShowMediaUpload(false)}
               />
             </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* Translation Settings */}
-      <AnimatePresence>
-        {showTranslationSettings && (
-          <motion.div
-            className="absolute inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-          >
-            <motion.div
-              initial={{ scale: 0.8, opacity: 0 }}
-              animate={{ scale: 1, opacity: 1 }}
-              exit={{ scale: 0.8, opacity: 0 }}
-              transition={{ duration: 0.3, type: "spring" }}
-            >
-              <TranslationSettings
-                onClose={() => setShowTranslationSettings(false)}
-              />
-            </motion.div>
-          </motion.div>
+          </div>
         )}
       </AnimatePresence>
 
@@ -601,15 +484,6 @@ export default function Chat({ partner, onDisconnect, onBack }: ChatProps) {
         )}
       </AnimatePresence>
 
-      {/* Security indicator */}
-      <motion.div
-        className="fixed bottom-4 right-4 bg-green-500/20 backdrop-blur-md border border-green-400/50 text-green-300 px-3 py-2 rounded-[1.5rem] flex items-center space-x-2 z-40"
-        animate={{ y: [0, -2, 0] }}
-        transition={{ duration: 3, repeat: Infinity }}
-      >
-        <ShieldCheck className="w-4 h-4" />
-        <span className="text-xs font-medium">End-to-End Encrypted</span>
-      </motion.div>
     </div>
   );
 }
