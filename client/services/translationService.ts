@@ -1,11 +1,19 @@
-// Translation service supporting multiple providers
-import axios from 'axios';
+import axios, { AxiosError } from 'axios';
+
+// --- Types & Interfaces ---
 
 export interface Language {
   code: string;
   name: string;
   nativeName: string;
   flag: string;
+  dir?: 'ltr' | 'rtl';
+}
+
+export interface TranslationRequest {
+  text: string;
+  from?: string; // 'auto' or code
+  to: string;
 }
 
 export interface TranslationResult {
@@ -13,206 +21,299 @@ export interface TranslationResult {
   translatedText: string;
   fromLanguage: string;
   toLanguage: string;
-  confidence?: number;
+  confidence: number;
+  provider: string; // Traceability
+  cached: boolean;
 }
 
-// Popular languages with flags
+export interface TranslationProvider {
+  name: string;
+  translate(req: TranslationRequest): Promise<TranslationResult>;
+  detect(text: string): Promise<string>;
+  isHealthy(): Promise<boolean>;
+}
+
+// --- Configuration ---
+const CONFIG = {
+  CACHE_SIZE: 1000,
+  REQUEST_TIMEOUT: 5000,
+  MAX_RETRIES: 3,
+  BATCH_CONCURRENCY: 5,
+  // Public APIs for demo (Replace with paid keys in production)
+  ENDPOINTS: {
+    LIBRE: 'https://libretranslate.de/translate',
+    MYMEMORY: 'https://api.mymemory.translated.net/get'
+  }
+};
+
+// --- Language Definitions ---
 export const SUPPORTED_LANGUAGES: Language[] = [
-  { code: 'en', name: 'English', nativeName: 'English', flag: '🇺🇸' },
-  { code: 'es', name: 'Spanish', nativeName: 'Español', flag: '🇪🇸' },
-  { code: 'fr', name: 'French', nativeName: 'Français', flag: '🇫🇷' },
-  { code: 'de', name: 'German', nativeName: 'Deutsch', flag: '🇩🇪' },
-  { code: 'it', name: 'Italian', nativeName: 'Italiano', flag: '🇮🇹' },
-  { code: 'pt', name: 'Portuguese', nativeName: 'Português', flag: '🇵🇹' },
-  { code: 'ru', name: 'Russian', nativeName: 'Русский', flag: '🇷🇺' },
-  { code: 'ja', name: 'Japanese', nativeName: '日本語', flag: '🇯🇵' },
-  { code: 'ko', name: 'Korean', nativeName: '한국어', flag: '🇰🇷' },
-  { code: 'zh', name: 'Chinese', nativeName: '中文', flag: '🇨🇳' },
-  { code: 'ar', name: 'Arabic', nativeName: 'العربية', flag: '🇸🇦' },
-  { code: 'hi', name: 'Hindi', nativeName: 'हिन्दी', flag: '🇮🇳' },
-  { code: 'tr', name: 'Turkish', nativeName: 'Türkçe', flag: '🇹🇷' },
-  { code: 'pl', name: 'Polish', nativeName: 'Polski', flag: '🇵🇱' },
-  { code: 'nl', name: 'Dutch', nativeName: 'Nederlands', flag: '🇳🇱' },
-  { code: 'sv', name: 'Swedish', nativeName: 'Svenska', flag: '🇸🇪' },
-  { code: 'da', name: 'Danish', nativeName: 'Dansk', flag: '🇩🇰' },
-  { code: 'no', name: 'Norwegian', nativeName: 'Norsk', flag: '🇳🇴' },
-  { code: 'fi', name: 'Finnish', nativeName: 'Suomi', flag: '🇫🇮' },
-  { code: 'el', name: 'Greek', nativeName: 'Ελληνικά', flag: '🇬🇷' },
+  { code: 'en', name: 'English', nativeName: 'English', flag: '🇺🇸', dir: 'ltr' },
+  { code: 'es', name: 'Spanish', nativeName: 'Español', flag: '🇪🇸', dir: 'ltr' },
+  { code: 'fr', name: 'French', nativeName: 'Français', flag: '🇫🇷', dir: 'ltr' },
+  { code: 'de', name: 'German', nativeName: 'Deutsch', flag: '🇩🇪', dir: 'ltr' },
+  { code: 'it', name: 'Italian', nativeName: 'Italiano', flag: '🇮🇹', dir: 'ltr' },
+  { code: 'pt', name: 'Portuguese', nativeName: 'Português', flag: '🇵🇹', dir: 'ltr' },
+  { code: 'ru', name: 'Russian', nativeName: 'Русский', flag: '🇷🇺', dir: 'ltr' },
+  { code: 'ja', name: 'Japanese', nativeName: '日本語', flag: '🇯🇵', dir: 'ltr' },
+  { code: 'ko', name: 'Korean', nativeName: '한국어', flag: '🇰🇷', dir: 'ltr' },
+  { code: 'zh', name: 'Chinese', nativeName: '中文', flag: '🇨🇳', dir: 'ltr' },
+  { code: 'ar', name: 'Arabic', nativeName: 'العربية', flag: '🇸🇦', dir: 'rtl' },
+  { code: 'hi', name: 'Hindi', nativeName: 'हिन्दी', flag: '🇮🇳', dir: 'ltr' },
 ];
 
-class TranslationService {
-  private cache = new Map<string, TranslationResult>();
+// --- Utilities ---
 
-  // Get cache key
-  private getCacheKey(text: string, from: string, to: string): string {
-    return `${from}-${to}-${text}`;
+/**
+ * Least Recently Used (LRU) Cache
+ * Prevents memory leaks by limiting the number of stored translations.
+ */
+class LRUCache<K, V> {
+  private values: Map<K, V> = new Map<K, V>();
+  private maxEntries: number;
+
+  constructor(maxEntries: number = CONFIG.CACHE_SIZE) {
+    this.maxEntries = maxEntries;
   }
 
-  // Detect language of text (simple heuristic)
-  detectLanguage(text: string): string {
-    // Simple language detection based on character patterns
-    if (/[\u4e00-\u9fff]/.test(text)) return 'zh'; // Chinese
-    if (/[\u3040-\u309f\u30a0-\u30ff]/.test(text)) return 'ja'; // Japanese
-    if (/[\uac00-\ud7af]/.test(text)) return 'ko'; // Korean
-    if (/[\u0600-\u06ff]/.test(text)) return 'ar'; // Arabic
-    if (/[\u0900-\u097f]/.test(text)) return 'hi'; // Hindi
-    if (/[\u0400-\u04ff]/.test(text)) return 'ru'; // Russian
-    if (/[\u0370-\u03ff]/.test(text)) return 'el'; // Greek
-    
-    // Default to English for Latin scripts
-    return 'en';
+  public get(key: K): V | undefined {
+    const entry = this.values.get(key);
+    if (entry) {
+      // Peek: re-insert to update "recently used" status
+      this.values.delete(key);
+      this.values.set(key, entry);
+    }
+    return entry;
   }
 
-  // Translate using LibreTranslate (free, self-hosted option)
-  async translateWithLibre(text: string, from: string, to: string): Promise<TranslationResult> {
+  public set(key: K, value: V) {
+    if (this.values.size >= this.maxEntries) {
+      // Evict oldest (first inserted)
+      const keyToDelete = this.values.keys().next().value;
+      if (keyToDelete) this.values.delete(keyToDelete);
+    }
+    this.values.set(key, value);
+  }
+
+  public clear() {
+    this.values.clear();
+  }
+}
+
+// --- Providers (Strategy Pattern) ---
+
+class LibreTranslateProvider implements TranslationProvider {
+  name = "LibreTranslate (Public)";
+
+  async translate(req: TranslationRequest): Promise<TranslationResult> {
     try {
-      // Using a public LibreTranslate instance (in production, use your own)
-      const response = await axios.post('https://libretranslate.de/translate', {
-        q: text,
-        source: from === 'auto' ? this.detectLanguage(text) : from,
-        target: to,
+      const { data } = await axios.post(CONFIG.ENDPOINTS.LIBRE, {
+        q: req.text,
+        source: req.from === 'auto' ? undefined : req.from, // Libre auto-detects if omitted
+        target: req.to,
         format: 'text'
-      }, {
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        timeout: 10000
-      });
+      }, { timeout: CONFIG.REQUEST_TIMEOUT });
 
       return {
-        originalText: text,
-        translatedText: response.data.translatedText,
-        fromLanguage: from,
-        toLanguage: to,
-        confidence: 0.8
+        originalText: req.text,
+        translatedText: data.translatedText,
+        fromLanguage: req.from || 'auto',
+        toLanguage: req.to,
+        confidence: 0.9,
+        provider: this.name,
+        cached: false
       };
-    } catch (error) {
-      console.error('LibreTranslate error:', error);
-      throw error;
+    } catch (e) {
+      throw new Error(`LibreTranslate failed: ${(e as Error).message}`);
     }
   }
 
-  // Translate using MyMemory (free API)
-  async translateWithMyMemory(text: string, from: string, to: string): Promise<TranslationResult> {
+  async detect(text: string): Promise<string> {
+    // Basic heuristic fallback if API unavailable
+    return 'en'; 
+  }
+
+  async isHealthy(): Promise<boolean> {
     try {
-      const langPair = `${from === 'auto' ? this.detectLanguage(text) : from}|${to}`;
-      const response = await axios.get('https://api.mymemory.translated.net/get', {
-        params: {
-          q: text,
-          langpair: langPair
-        },
-        timeout: 10000
-      });
-
-      if (response.data.responseStatus === 200) {
-        return {
-          originalText: text,
-          translatedText: response.data.responseData.translatedText,
-          fromLanguage: from,
-          toLanguage: to,
-          confidence: response.data.responseData.match
-        };
-      } else {
-        throw new Error(response.data.responseDetails);
-      }
-    } catch (error) {
-      console.error('MyMemory translate error:', error);
-      throw error;
-    }
+      // Simple ping (replace with actual health endpoint if available)
+      return true; 
+    } catch { return false; }
   }
+}
 
-  // Fallback simple translation for demo (when APIs fail)
-  async translateFallback(text: string, from: string, to: string): Promise<TranslationResult> {
-    // Simple substitution for demo purposes
-    const commonTranslations: Record<string, Record<string, string>> = {
-      'en': {
-        'es': { 'hello': 'hola', 'goodbye': 'adiós', 'thank you': 'gracias', 'yes': 'sí', 'no': 'no' },
-        'fr': { 'hello': 'bonjour', 'goodbye': 'au revoir', 'thank you': 'merci', 'yes': 'oui', 'no': 'non' },
-        'de': { 'hello': 'hallo', 'goodbye': 'auf wiedersehen', 'thank you': 'danke', 'yes': 'ja', 'no': 'nein' },
-        'it': { 'hello': 'ciao', 'goodbye': 'arrivederci', 'thank you': 'grazie', 'yes': 'sì', 'no': 'no' },
-        'pt': { 'hello': 'olá', 'goodbye': 'tchau', 'thank you': 'obrigado', 'yes': 'sim', 'no': 'não' },
-        'ru': { 'hello': 'привет', 'goodbye': 'до свидания', 'thank you': 'спасибо', 'yes': 'да', 'no': 'нет' },
-        'ja': { 'hello': 'こんにちは', 'goodbye': 'さようなら', 'thank you': 'ありがとう', 'yes': 'はい', 'no': 'いいえ' },
-        'zh': { 'hello': '你好', 'goodbye': '再见', 'thank you': '谢谢', 'yes': '是', 'no': '不' }
-      }
-    };
+class MyMemoryProvider implements TranslationProvider {
+  name = "MyMemory API";
 
-    const translations = commonTranslations[from]?.[to];
-    const lowerText = text.toLowerCase();
-    const translatedText = translations?.[lowerText] || `[${text}]→${to}`;
+  async translate(req: TranslationRequest): Promise<TranslationResult> {
+    const source = req.from === 'auto' ? '' : req.from;
+    const pair = source ? `${source}|${req.to}` : `|${req.to}`; // Auto-detect format
+
+    const { data } = await axios.get(CONFIG.ENDPOINTS.MYMEMORY, {
+      params: { q: req.text, langpair: pair },
+      timeout: CONFIG.REQUEST_TIMEOUT
+    });
+
+    if (data.responseStatus !== 200) throw new Error(data.responseDetails);
 
     return {
-      originalText: text,
-      translatedText,
-      fromLanguage: from,
-      toLanguage: to,
-      confidence: 0.3
+      originalText: req.text,
+      translatedText: data.responseData.translatedText,
+      fromLanguage: req.from || 'auto',
+      toLanguage: req.to,
+      confidence: data.responseData.match,
+      provider: this.name,
+      cached: false
     };
   }
 
-  // Main translate method with fallbacks
+  async detect(text: string): Promise<string> { return 'en'; }
+  async isHealthy(): Promise<boolean> { return true; }
+}
+
+class OfflineFallbackProvider implements TranslationProvider {
+  name = "Offline Dictionary";
+  
+  // A tiny static dictionary for demo purposes when internet is down
+  private dictionary: Record<string, Record<string, string>> = {
+    'hello': { 'es': 'hola', 'fr': 'bonjour', 'de': 'hallo', 'ja': 'こんにちは' },
+    'thank you': { 'es': 'gracias', 'fr': 'merci', 'de': 'danke', 'ja': 'ありがとう' },
+    'yes': { 'es': 'sí', 'fr': 'oui', 'de': 'ja', 'ja': 'はい' },
+    'no': { 'es': 'no', 'fr': 'non', 'de': 'nein', 'ja': 'いいえ' },
+  };
+
+  async translate(req: TranslationRequest): Promise<TranslationResult> {
+    const lower = req.text.toLowerCase().trim();
+    const exactMatch = this.dictionary[lower]?.[req.to];
+
+    return {
+      originalText: req.text,
+      translatedText: exactMatch || `[${req.to}: ${req.text}]`,
+      fromLanguage: req.from || 'auto',
+      toLanguage: req.to,
+      confidence: exactMatch ? 1.0 : 0.1,
+      provider: this.name,
+      cached: false
+    };
+  }
+
+  async detect(text: string): Promise<string> { return 'en'; }
+  async isHealthy(): Promise<boolean> { return true; }
+}
+
+// --- Main Service ---
+
+export class TranslationService {
+  private providers: TranslationProvider[];
+  private cache: LRUCache<string, TranslationResult>;
+  private circuitOpen: boolean = false;
+
+  constructor() {
+    this.cache = new LRUCache(CONFIG.CACHE_SIZE);
+    // Priority order: 1. Libre (Best), 2. MyMemory (Backup), 3. Offline (Last Resort)
+    this.providers = [
+      new LibreTranslateProvider(),
+      new MyMemoryProvider(),
+      new OfflineFallbackProvider()
+    ];
+  }
+
+  private getCacheKey(req: TranslationRequest): string {
+    return `${req.from || 'auto'}:${req.to}:${req.text.trim()}`;
+  }
+
+  /**
+   * Smart Translation with Fallback Chain
+   */
   async translate(text: string, from: string = 'auto', to: string = 'en'): Promise<TranslationResult> {
-    // Skip translation if same language
-    if (from === to && from !== 'auto') {
-      return {
-        originalText: text,
-        translatedText: text,
-        fromLanguage: from,
-        toLanguage: to,
-        confidence: 1.0
-      };
+    if (!text?.trim()) return this.createEmptyResult(from, to);
+    if (from === to) return this.createIdentityResult(text, from);
+
+    const req: TranslationRequest = { text, from, to };
+    const cacheKey = this.getCacheKey(req);
+
+    // 1. Check Cache
+    const cached = this.cache.get(cacheKey);
+    if (cached) {
+      return { ...cached, cached: true };
     }
 
-    // Check cache first
-    const cacheKey = this.getCacheKey(text, from, to);
-    if (this.cache.has(cacheKey)) {
-      return this.cache.get(cacheKey)!;
-    }
+    // 2. Try Providers sequentially
+    let lastError: Error | null = null;
 
-    try {
-      // Try LibreTranslate first
-      console.log('🌐 Attempting translation with LibreTranslate...');
-      const result = await this.translateWithLibre(text, from, to);
-      this.cache.set(cacheKey, result);
-      return result;
-    } catch (error) {
-      console.log('LibreTranslate failed, trying MyMemory...');
-      
+    for (const provider of this.providers) {
       try {
-        // Try MyMemory as backup
-        const result = await this.translateWithMyMemory(text, from, to);
+        const result = await provider.translate(req);
         this.cache.set(cacheKey, result);
         return result;
-      } catch (error2) {
-        console.log('MyMemory failed, using fallback...');
-        
-        // Use fallback
-        const result = await this.translateFallback(text, from, to);
-        this.cache.set(cacheKey, result);
-        return result;
+      } catch (error) {
+        console.warn(`⚠️ Provider ${provider.name} failed:`, error);
+        lastError = error as Error;
+        continue; // Try next provider
       }
     }
+
+    // 3. Absolute failure (should technically never happen due to OfflineFallback)
+    console.error("All translation providers failed.");
+    return {
+      originalText: text,
+      translatedText: text, // Return original as fail-safe
+      fromLanguage: from,
+      toLanguage: to,
+      confidence: 0,
+      provider: 'failed',
+      cached: false
+    };
   }
 
-  // Batch translate multiple texts
-  async translateBatch(texts: string[], from: string = 'auto', to: string = 'en'): Promise<TranslationResult[]> {
-    const promises = texts.map(text => this.translate(text, from, to));
-    return Promise.all(promises);
+  /**
+   * Batch Translate with Concurrency Control
+   * prevents 429 errors by processing in chunks
+   */
+  async translateBatch(texts: string[], from: string, to: string): Promise<TranslationResult[]> {
+    const results: TranslationResult[] = new Array(texts.length);
+    const queue = texts.map((text, index) => ({ text, index }));
+    
+    // Process queue in chunks
+    const processChunk = async () => {
+      while (queue.length > 0) {
+        const batch = queue.splice(0, CONFIG.BATCH_CONCURRENCY);
+        const promises = batch.map(async (item) => {
+          try {
+            results[item.index] = await this.translate(item.text, from, to);
+          } catch (e) {
+            results[item.index] = this.createIdentityResult(item.text, from);
+          }
+        });
+        await Promise.all(promises);
+      }
+    };
+
+    await processChunk();
+    return results;
   }
 
-  // Clear cache
-  clearCache(): void {
-    this.cache.clear();
+  // --- Helpers ---
+
+  private createEmptyResult(from: string, to: string): TranslationResult {
+    return { originalText: '', translatedText: '', fromLanguage: from, toLanguage: to, confidence: 1, provider: 'none', cached: false };
   }
 
-  // Get supported languages
-  getSupportedLanguages(): Language[] {
-    return SUPPORTED_LANGUAGES;
+  private createIdentityResult(text: string, lang: string): TranslationResult {
+    return { originalText: text, translatedText: text, fromLanguage: lang, toLanguage: lang, confidence: 1, provider: 'identity', cached: false };
   }
 
-  // Find language by code
+  // Detect language locally (Client-Side Heuristic)
+  detectLanguageLocal(text: string): string {
+    if (/[\u4e00-\u9fff]/.test(text)) return 'zh';
+    if (/[\u3040-\u309f\u30a0-\u30ff]/.test(text)) return 'ja';
+    if (/[\uac00-\ud7af]/.test(text)) return 'ko';
+    if (/[\u0600-\u06ff]/.test(text)) return 'ar';
+    if (/[\u0400-\u04ff]/.test(text)) return 'ru';
+    return 'en'; // Default
+  }
+
   getLanguageByCode(code: string): Language | undefined {
-    return SUPPORTED_LANGUAGES.find(lang => lang.code === code);
+    return SUPPORTED_LANGUAGES.find(l => l.code === code);
   }
 }
 
