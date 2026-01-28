@@ -1,12 +1,21 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useCallback, useMemo } from 'react';
 
+// --- Configuration: Material Design 3 Breakpoints ---
+export const BREAKPOINTS = {
+  xs: 0,
+  sm: 600,  // Mobile Landscape
+  md: 900,  // Tablet Portrait
+  lg: 1200, // Tablet Landscape / Laptop
+  xl: 1536, // Desktop
+};
+
+// --- Types ---
 export interface BreakpointValues {
   xs: boolean;
   sm: boolean;
   md: boolean;
   lg: boolean;
   xl: boolean;
-  xxl: boolean;
 }
 
 export interface ResponsiveInfo {
@@ -20,125 +29,141 @@ export interface ResponsiveInfo {
   orientation: 'portrait' | 'landscape';
   isOnline: boolean;
   devicePixelRatio: number;
+  // Device Capabilities
+  isTouchDevice: boolean;
   supportsHover: boolean;
   prefersReducedMotion: boolean;
-  isTouchDevice: boolean;
 }
 
-const BREAKPOINTS = {
-  xs: 0,
-  sm: 576,
-  md: 768,
-  lg: 1024,
-  xl: 1280,
-  xxl: 1536
-};
+// --- Helper: High-Performance Media Query Hook ---
+function useMediaQuery(query: string): boolean {
+  const [matches, setMatches] = useState(false);
 
-function getBreakpoints(width: number): BreakpointValues {
-  return {
-    xs: width >= BREAKPOINTS.xs,
-    sm: width >= BREAKPOINTS.sm,
-    md: width >= BREAKPOINTS.md,
-    lg: width >= BREAKPOINTS.lg,
-    xl: width >= BREAKPOINTS.xl,
-    xxl: width >= BREAKPOINTS.xxl
-  };
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    
+    const media = window.matchMedia(query);
+    // Set initial value
+    setMatches(media.matches);
+
+    const listener = (e: MediaQueryListEvent) => setMatches(e.matches);
+    
+    // Modern browsers
+    if (media.addEventListener) {
+      media.addEventListener('change', listener);
+      return () => media.removeEventListener('change', listener);
+    } 
+    // Fallback for older Safari
+    else {
+      media.addListener(listener);
+      return () => media.removeListener(listener);
+    }
+  }, [query]);
+
+  return matches;
 }
 
-function detectDeviceCapabilities() {
-  const isTouchDevice = 'ontouchstart' in window || navigator.maxTouchPoints > 0;
-  const supportsHover = window.matchMedia('(hover: hover)').matches;
-  const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+// --- Core Hook: useResponsive ---
+export function useResponsive(): ResponsiveInfo {
+  // 1. Efficient Breakpoint Detection (No resize listeners)
+  const isMobile = useMediaQuery(`(max-width: ${BREAKPOINTS.sm - 0.05}px)`);
+  const isTablet = useMediaQuery(`(min-width: ${BREAKPOINTS.sm}px) and (max-width: ${BREAKPOINTS.lg - 0.05}px)`);
+  const isDesktop = useMediaQuery(`(min-width: ${BREAKPOINTS.lg}px)`);
+  const isLargeDesktop = useMediaQuery(`(min-width: ${BREAKPOINTS.xl}px)`);
+
+  // 2. Window Dimensions (Debounced)
+  const [dimensions, setDimensions] = useState({
+    width: typeof window !== 'undefined' ? window.innerWidth : 1200,
+    height: typeof window !== 'undefined' ? window.innerHeight : 800
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+
+    let timeoutId: NodeJS.Timeout;
+    const handleResize = () => {
+      clearTimeout(timeoutId);
+      timeoutId = setTimeout(() => {
+        setDimensions({
+          width: window.innerWidth,
+          height: window.innerHeight
+        });
+      }, 150); // 150ms debounce
+    };
+
+    window.addEventListener('resize', handleResize);
+    return () => {
+      window.removeEventListener('resize', handleResize);
+      clearTimeout(timeoutId);
+    };
+  }, []);
+
+  // 3. Network Status
+  const [isOnline, setIsOnline] = useState(typeof navigator !== 'undefined' ? navigator.onLine : true);
+  useEffect(() => {
+    const setOnline = () => setIsOnline(true);
+    const setOffline = () => setIsOnline(false);
+    window.addEventListener('online', setOnline);
+    window.addEventListener('offline', setOffline);
+    return () => {
+      window.removeEventListener('online', setOnline);
+      window.removeEventListener('offline', setOffline);
+    };
+  }, []);
+
+  // 4. Capabilities (Media Queries)
+  const supportsHover = useMediaQuery('(hover: hover)');
+  const prefersReducedMotion = useMediaQuery('(prefers-reduced-motion: reduce)');
   
+  // Touch detection
+  const [isTouchDevice, setIsTouchDevice] = useState(false);
+  useEffect(() => {
+    setIsTouchDevice('ontouchstart' in window || navigator.maxTouchPoints > 0);
+  }, []);
+
+  const orientation = dimensions.width > dimensions.height ? 'landscape' : 'portrait';
+
   return {
+    breakpoints: {
+      xs: true,
+      sm: dimensions.width >= BREAKPOINTS.sm,
+      md: dimensions.width >= BREAKPOINTS.md,
+      lg: dimensions.width >= BREAKPOINTS.lg,
+      xl: dimensions.width >= BREAKPOINTS.xl,
+    },
+    isMobile,
+    isTablet,
+    isDesktop,
+    isLargeDesktop,
+    width: dimensions.width,
+    height: dimensions.height,
+    orientation,
+    isOnline,
+    devicePixelRatio: typeof window !== 'undefined' ? window.devicePixelRatio : 1,
     isTouchDevice,
     supportsHover,
     prefersReducedMotion
   };
 }
 
-export function useResponsive(): ResponsiveInfo {
-  const [windowDimensions, setWindowDimensions] = useState(() => ({
-    width: typeof window !== 'undefined' ? window.innerWidth : 1024,
-    height: typeof window !== 'undefined' ? window.innerHeight : 768
-  }));
-
-  const [isOnline, setIsOnline] = useState(() => 
-    typeof navigator !== 'undefined' ? navigator.onLine : true
-  );
-
-  const [deviceCapabilities] = useState(() => 
-    typeof window !== 'undefined' ? detectDeviceCapabilities() : {
-      isTouchDevice: false,
-      supportsHover: true,
-      prefersReducedMotion: false
-    }
-  );
-
-  useEffect(() => {
-    function handleResize() {
-      setWindowDimensions({
-        width: window.innerWidth,
-        height: window.innerHeight
-      });
-    }
-
-    function handleOnline() {
-      setIsOnline(true);
-    }
-
-    function handleOffline() {
-      setIsOnline(false);
-    }
-
-    window.addEventListener('resize', handleResize);
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-
-    return () => {
-      window.removeEventListener('resize', handleResize);
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
-
-  const breakpoints = getBreakpoints(windowDimensions.width);
-  const orientation = windowDimensions.width > windowDimensions.height ? 'landscape' : 'portrait';
-  const devicePixelRatio = typeof window !== 'undefined' ? window.devicePixelRatio : 1;
-
-  return {
-    breakpoints,
-    isMobile: windowDimensions.width < BREAKPOINTS.md,
-    isTablet: windowDimensions.width >= BREAKPOINTS.md && windowDimensions.width < BREAKPOINTS.lg,
-    isDesktop: windowDimensions.width >= BREAKPOINTS.lg,
-    isLargeDesktop: windowDimensions.width >= BREAKPOINTS.xl,
-    width: windowDimensions.width,
-    height: windowDimensions.height,
-    orientation,
-    isOnline,
-    devicePixelRatio,
-    ...deviceCapabilities
-  };
-}
-
-// Utility hook for viewport-specific behavior
+// --- Hook 2: useViewport (UI Layout & Safe Areas) ---
 export function useViewport() {
   const responsive = useResponsive();
-  
-  const getOptimalImageSize = () => {
+
+  const getOptimalImageSize = useCallback(() => {
     if (responsive.isMobile) return 'small';
     if (responsive.isTablet) return 'medium';
     return 'large';
-  };
+  }, [responsive.isMobile, responsive.isTablet]);
 
-  const getOptimalVideoQuality = () => {
+  const getOptimalVideoQuality = useCallback(() => {
     if (responsive.isMobile) return '480p';
     if (responsive.isTablet) return '720p';
     return '1080p';
-  };
+  }, [responsive.isMobile, responsive.isTablet]);
 
-  const getSafeAreaInsets = () => {
-    // For mobile devices with notches or rounded corners
+  const getSafeAreaInsets = useCallback(() => {
+    if (typeof window === 'undefined') return { top: '0px', bottom: '0px', left: '0px', right: '0px' };
     const style = getComputedStyle(document.documentElement);
     return {
       top: style.getPropertyValue('env(safe-area-inset-top)') || '0px',
@@ -146,13 +171,9 @@ export function useViewport() {
       bottom: style.getPropertyValue('env(safe-area-inset-bottom)') || '0px',
       left: style.getPropertyValue('env(safe-area-inset-left)') || '0px'
     };
-  };
+  }, []);
 
-  const shouldUseAnimation = () => {
-    return !responsive.prefersReducedMotion && responsive.isOnline;
-  };
-
-  const getOptimalChatLayout = () => {
+  const getOptimalChatLayout = useCallback(() => {
     if (responsive.isMobile) {
       return {
         messageMaxWidth: '85%',
@@ -162,54 +183,54 @@ export function useViewport() {
         showQuickActions: false
       };
     }
-    
     if (responsive.isTablet) {
       return {
-        messageMaxWidth: '70%',
+        messageMaxWidth: '75%',
         showSidebar: responsive.orientation === 'landscape',
         stackVertically: false,
-        compactMode: false,
+        compactMode: true,
         showQuickActions: true
       };
     }
-
+    // Desktop
     return {
-      messageMaxWidth: '60%',
+      messageMaxWidth: '65%',
       showSidebar: true,
       stackVertically: false,
       compactMode: false,
       showQuickActions: true
     };
-  };
+  }, [responsive.isMobile, responsive.isTablet, responsive.orientation]);
 
   return {
     ...responsive,
     getOptimalImageSize,
     getOptimalVideoQuality,
     getSafeAreaInsets,
-    shouldUseAnimation,
+    shouldUseAnimation: !responsive.prefersReducedMotion && responsive.isOnline,
     getOptimalChatLayout
   };
 }
 
-// Performance optimization hook
+// --- Hook 3: usePerformanceOptimization (Loading & Rendering) ---
 export function usePerformanceOptimization() {
   const responsive = useResponsive();
   
+  // Derived state
   const shouldLazyLoad = responsive.isMobile || !responsive.isOnline;
-  const shouldReduceAnimations = responsive.prefersReducedMotion || responsive.isMobile;
+  const shouldReduceAnimations = responsive.prefersReducedMotion || (responsive.isMobile && responsive.devicePixelRatio < 2);
   const shouldOptimizeImages = responsive.isMobile || responsive.devicePixelRatio < 2;
-  const shouldUseVirtualization = responsive.isMobile; // For long lists
-  
-  const getOptimalBatchSize = () => {
-    if (responsive.isMobile) return 10;
-    if (responsive.isTablet) return 20;
-    return 50;
-  };
+  const shouldUseVirtualization = responsive.isMobile; // Always virtualize lists on mobile
 
-  const shouldPreloadContent = () => {
+  const getOptimalBatchSize = useCallback(() => {
+    if (responsive.isMobile) return 15;
+    if (responsive.isTablet) return 30;
+    return 50;
+  }, [responsive.isMobile, responsive.isTablet]);
+
+  const shouldPreloadContent = useCallback(() => {
     return responsive.isOnline && !responsive.isMobile;
-  };
+  }, [responsive.isOnline, responsive.isMobile]);
 
   return {
     shouldLazyLoad,
@@ -221,119 +242,93 @@ export function usePerformanceOptimization() {
   };
 }
 
-// Accessibility hook
+// --- Hook 4: useAccessibility (A11y preferences) ---
 export function useAccessibility() {
   const responsive = useResponsive();
   
-  const [highContrastMode, setHighContrastMode] = useState(false);
-  const [largeTextMode, setLargeTextMode] = useState(false);
+  // Media Queries for A11y
+  const highContrastMode = useMediaQuery('(prefers-contrast: high)');
+  const largeTextMode = useMediaQuery('(prefers-reduced-data: reduce)'); // Proxy for "Data Saver" often used with accessibility
 
-  useEffect(() => {
-    const highContrastQuery = window.matchMedia('(prefers-contrast: high)');
-    const largeTextQuery = window.matchMedia('(prefers-reduced-data: reduce)');
-    
-    setHighContrastMode(highContrastQuery.matches);
-    
-    const handleHighContrastChange = (e: MediaQueryListEvent) => {
-      setHighContrastMode(e.matches);
-    };
+  const getAccessibleTapTargetSize = useCallback(() => {
+    return responsive.isTouchDevice ? '48px' : '32px'; // WCAG Standards
+  }, [responsive.isTouchDevice]);
 
-    highContrastQuery.addEventListener('change', handleHighContrastChange);
-    
-    return () => {
-      highContrastQuery.removeEventListener('change', handleHighContrastChange);
-    };
-  }, []);
+  const shouldUseLargeText = largeTextMode || responsive.isMobile;
 
-  const getAccessibleTapTargetSize = () => {
-    // Minimum 48px for mobile touch targets
-    return responsive.isTouchDevice ? '48px' : '32px';
-  };
-
-  const shouldUseLargeText = () => {
-    return largeTextMode || responsive.isMobile;
-  };
-
-  const getOptimalFontSize = () => {
-    if (shouldUseLargeText()) {
-      return {
-        xs: '14px',
-        sm: '16px',
-        base: '18px',
-        lg: '20px',
-        xl: '22px'
-      };
+  const getOptimalFontSize = useCallback(() => {
+    if (shouldUseLargeText) {
+      return { xs: '16px', sm: '18px', base: '20px', lg: '24px', xl: '30px' };
     }
-    
-    return {
-      xs: '12px',
-      sm: '14px',
-      base: '16px',
-      lg: '18px',
-      xl: '20px'
-    };
-  };
+    return { xs: '14px', sm: '16px', base: '16px', lg: '18px', xl: '24px' };
+  }, [shouldUseLargeText]);
 
   return {
     highContrastMode,
     largeTextMode,
-    setLargeTextMode,
     getAccessibleTapTargetSize,
     shouldUseLargeText,
     getOptimalFontSize,
-    shouldShowTooltips: !responsive.isTouchDevice,
-    shouldUseVoiceOver: responsive.isTouchDevice
+    shouldShowTooltips: !responsive.isTouchDevice && responsive.supportsHover,
+    shouldUseVoiceOver: responsive.isTouchDevice // Heuristic
   };
 }
 
-// Network optimization hook
+// --- Hook 5: useNetworkOptimization (Connection aware) ---
 export function useNetworkOptimization() {
   const responsive = useResponsive();
-  const [connectionType, setConnectionType] = useState<string>('unknown');
-  const [effectiveType, setEffectiveType] = useState<string>('4g');
+  
+  const [connection, setConnection] = useState<any>(null);
 
   useEffect(() => {
-    // Check if navigator.connection is available (Chrome/Edge)
-    const connection = (navigator as any).connection || (navigator as any).mozConnection || (navigator as any).webkitConnection;
+    // Network Information API (Chrome/Edge/Android)
+    const conn = (navigator as any).connection || 
+                 (navigator as any).mozConnection || 
+                 (navigator as any).webkitConnection;
     
-    if (connection) {
-      setConnectionType(connection.type || 'unknown');
-      setEffectiveType(connection.effectiveType || '4g');
-      
-      const handleConnectionChange = () => {
-        setConnectionType(connection.type || 'unknown');
-        setEffectiveType(connection.effectiveType || '4g');
+    if (conn) {
+      setConnection({
+        type: conn.type,
+        effectiveType: conn.effectiveType,
+        saveData: conn.saveData
+      });
+
+      const updateConnection = () => {
+        setConnection({
+          type: conn.type,
+          effectiveType: conn.effectiveType,
+          saveData: conn.saveData
+        });
       };
-      
-      connection.addEventListener('change', handleConnectionChange);
-      
-      return () => {
-        connection.removeEventListener('change', handleConnectionChange);
-      };
+
+      conn.addEventListener('change', updateConnection);
+      return () => conn.removeEventListener('change', updateConnection);
     }
   }, []);
 
+  // Defaults if API unavailable
+  const effectiveType = connection?.effectiveType || '4g';
   const isSlowConnection = effectiveType === '2g' || effectiveType === 'slow-2g';
-  const isFastConnection = effectiveType === '4g' || effectiveType === '5g';
+  const isFastConnection = effectiveType === '4g' || effectiveType === '5g'; // 5g isn't standard spec yet but future proofing
 
-  const shouldCompressImages = isSlowConnection || !responsive.isOnline;
-  const shouldReduceQuality = isSlowConnection;
-  const shouldPrefetchContent = isFastConnection && responsive.isOnline;
-  
-  const getOptimalImageFormat = () => {
-    if (isSlowConnection) return 'webp';
-    if (isFastConnection) return 'avif';
-    return 'jpeg';
-  };
+  const shouldCompressImages = isSlowConnection || !responsive.isOnline || connection?.saveData;
+  const shouldReduceQuality = isSlowConnection || connection?.saveData;
+  const shouldPrefetchContent = isFastConnection && responsive.isOnline && !connection?.saveData;
 
-  const getOptimalVideoSettings = () => ({
-    autoplay: isFastConnection,
+  const getOptimalImageFormat = useCallback(() => {
+    if (isSlowConnection) return 'webp'; // Smaller
+    if (isFastConnection) return 'avif'; // High quality
+    return 'jpeg'; // Safe default
+  }, [isSlowConnection, isFastConnection]);
+
+  const getOptimalVideoSettings = useCallback(() => ({
+    autoplay: isFastConnection && !connection?.saveData,
     preload: isFastConnection ? 'auto' : 'metadata',
     quality: isSlowConnection ? 'low' : 'high'
-  });
+  }), [isFastConnection, isSlowConnection, connection?.saveData]);
 
   return {
-    connectionType,
+    connectionType: connection?.type || 'unknown',
     effectiveType,
     isSlowConnection,
     isFastConnection,
