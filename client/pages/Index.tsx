@@ -7,7 +7,7 @@ import Pairing from './Pairing';
 import Chat from './Chat';
 import ContactsList from './ContactsList';
 import GroupChat from './GroupChat';
-import { Loader2, MessageCircle, Shield, Wifi, Users } from 'lucide-react';
+import { Loader2, MessageCircle, ShieldCheck, Wifi, Users, LayoutGrid, MessageSquare } from 'lucide-react';
 import { ConnectionStatus } from '@shared/api';
 import { motion, AnimatePresence } from 'framer-motion';
 
@@ -121,7 +121,6 @@ export default function Index() {
 
   const loadUserData = async () => {
     // Mock loading user statistics
-    // In a real app, this would fetch from API
     setTimeout(() => {
       setConnectionStats({
         totalContacts: 12,
@@ -129,7 +128,7 @@ export default function Index() {
         activeGroups: 3,
         unreadMessages: 5
       });
-    }, 1000);
+    }, 800);
   };
 
   const handleSelectContact = (contact: Contact) => {
@@ -138,7 +137,6 @@ export default function Index() {
   };
 
   const handleCreateGroup = (contacts: Contact[]) => {
-    // Create a new group with selected contacts
     const newGroup: GroupInfo = {
       id: `group-${Date.now()}`,
       name: `Group with ${contacts.map(c => c.username || c.email).join(', ')}`,
@@ -147,7 +145,6 @@ export default function Index() {
       createdAt: new Date().toISOString(),
       createdBy: user?.id || '',
       members: [
-        // Add current user as admin
         {
           id: user?.id || '',
           email: user?.email || '',
@@ -156,7 +153,6 @@ export default function Index() {
           role: 'admin' as const,
           joinedAt: new Date().toISOString()
         },
-        // Add selected contacts as members
         ...contacts.map(contact => ({
           id: contact.id,
           email: contact.email,
@@ -199,111 +195,57 @@ export default function Index() {
     setCurrentGroup(updatedGroup);
   };
 
-  // Enhanced loading screen with stats
+  // --- MATERIAL LOADING SCREEN ---
   if (isLoading || isCheckingConnection) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-violet-600 via-purple-600 to-blue-700 flex items-center justify-center relative overflow-hidden">
-        {/* Animated background elements */}
-        <div className="absolute inset-0 pointer-events-none">
-          {[...Array(6)].map((_, i) => (
-            <motion.div
-              key={i}
-              className="absolute w-32 h-32 rounded-full bg-white/5 backdrop-blur-sm"
-              style={{
-                left: `${Math.random() * 100}%`,
-                top: `${Math.random() * 100}%`
-              }}
-              animate={{
-                x: [0, 30, 0],
-                y: [0, -30, 0],
-                opacity: [0.3, 0.6, 0.3],
-                scale: [1, 1.1, 1]
-              }}
-              transition={{
-                duration: 8 + i * 2,
-                repeat: Infinity,
-                ease: "easeInOut"
-              }}
-            />
-          ))}
-        </div>
-
-        <motion.div 
-          className="glass bg-white/10 backdrop-blur-xl rounded-[2.5rem] p-8 border border-white/20 shadow-2xl relative overflow-hidden max-w-md w-full mx-4"
-          initial={{ opacity: 0, scale: 0.8, y: 50 }}
-          animate={{ opacity: 1, scale: 1, y: 0 }}
-          transition={{ duration: 0.6, type: "spring", bounce: 0.3 }}
-        >
-          {/* Shimmer effect */}
-          <motion.div
-            className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent"
-            animate={{
-              x: [-100, 100],
-              opacity: [0, 1, 0]
-            }}
-            transition={{
-              duration: 2,
-              repeat: Infinity,
-              ease: "easeInOut"
-            }}
-          />
-          
-          <div className="relative z-10">
-            {/* Header */}
-            <div className="text-center mb-6">
-              <motion.div 
-                className="w-16 h-16 bg-gradient-to-br from-white/20 to-white/10 backdrop-blur-xl rounded-[2rem] flex items-center justify-center mx-auto mb-4 border border-white/30"
-                animate={{ rotate: [0, 360] }}
-                transition={{ duration: 3, repeat: Infinity, ease: "linear" }}
-              >
+      <div className="min-h-screen bg-[#F0F2F5] flex items-center justify-center font-sans text-slate-900">
+        <div className="w-full max-w-sm px-6">
+          <motion.div 
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            className="bg-white rounded-2xl shadow-xl p-8 border border-slate-100 text-center"
+          >
+            {/* Logo Animation */}
+            <div className="relative mx-auto w-16 h-16 mb-6">
+              <div className="absolute inset-0 bg-indigo-100 rounded-full animate-ping opacity-20"></div>
+              <div className="relative bg-indigo-600 w-16 h-16 rounded-full flex items-center justify-center shadow-lg shadow-indigo-200">
                 <MessageCircle className="w-8 h-8 text-white" />
-              </motion.div>
-              <h2 className="text-2xl font-bold text-white mb-2">SecureChat</h2>
-              <p className="text-white/70">Initializing secure connection...</p>
+              </div>
             </div>
 
-            {/* Loading indicator */}
-            <div className="flex items-center justify-center space-x-3 text-white mb-6">
-              <Loader2 className="w-6 h-6 animate-spin" />
-              <span className="text-lg">Loading</span>
+            <h2 className="text-xl font-bold text-slate-800 mb-2">SecureChat</h2>
+            <div className="flex items-center justify-center space-x-2 text-indigo-600 mb-6">
+               <Loader2 className="w-4 h-4 animate-spin" />
+               <span className="text-sm font-medium">Establishing connection...</span>
             </div>
 
-            {/* Stats preview */}
+            {/* Stats Grid */}
             {connectionStats.totalContacts > 0 && (
-              <motion.div 
-                className="grid grid-cols-2 gap-4"
-                initial={{ opacity: 0, y: 20 }}
-                animate={{ opacity: 1, y: 0 }}
-                transition={{ delay: 0.5, duration: 0.5 }}
-              >
-                <div className="bg-white/10 rounded-[1.5rem] p-3 text-center backdrop-blur-sm">
-                  <div className="flex items-center justify-center text-blue-400 mb-1">
-                    <Users className="w-4 h-4 mr-1" />
-                    <span className="font-bold">{connectionStats.totalContacts}</span>
+              <div className="grid grid-cols-2 gap-3 mb-6">
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                  <div className="flex items-center justify-center text-slate-700 font-bold text-lg mb-1">
+                    <Users className="w-4 h-4 mr-1.5 text-indigo-500" />
+                    {connectionStats.totalContacts}
                   </div>
-                  <p className="text-white/70 text-xs">Contacts</p>
+                  <div className="text-xs text-slate-400 font-medium">Contacts</div>
                 </div>
-                <div className="bg-white/10 rounded-[1.5rem] p-3 text-center backdrop-blur-sm">
-                  <div className="flex items-center justify-center text-green-400 mb-1">
-                    <Wifi className="w-4 h-4 mr-1" />
-                    <span className="font-bold">{connectionStats.onlineContacts}</span>
+                <div className="bg-slate-50 p-3 rounded-xl border border-slate-100">
+                  <div className="flex items-center justify-center text-slate-700 font-bold text-lg mb-1">
+                    <Wifi className="w-4 h-4 mr-1.5 text-green-500" />
+                    {connectionStats.onlineContacts}
                   </div>
-                  <p className="text-white/70 text-xs">Online</p>
+                  <div className="text-xs text-slate-400 font-medium">Online</div>
                 </div>
-              </motion.div>
+              </div>
             )}
 
-            {/* Security badge */}
-            <motion.div 
-              className="mt-6 flex items-center justify-center space-x-2 text-green-300"
-              animate={{ opacity: [0.7, 1, 0.7] }}
-              transition={{ duration: 2, repeat: Infinity }}
-            >
-              <Shield className="w-4 h-4" />
-              <span className="text-sm font-medium">End-to-End Encrypted</span>
-            </motion.div>
-          </div>
-        </motion.div>
+            {/* Security Badge */}
+            <div className="flex items-center justify-center space-x-2 text-slate-400 bg-slate-50 py-2 rounded-lg border border-slate-100">
+              <ShieldCheck className="w-4 h-4 text-green-500" />
+              <span className="text-xs font-medium">Encrypted & Secure</span>
+            </div>
+          </motion.div>
+        </div>
       </div>
     );
   }
@@ -313,77 +255,86 @@ export default function Index() {
     return <Auth />;
   }
 
+  // Main App Router
   return (
-    <AnimatePresence mode="wait">
-      {appState === 'contacts' && (
-        <motion.div
-          key="contacts"
-          initial={{ opacity: 0, x: -50 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: 50 }}
-          transition={{ duration: 0.3 }}
-        >
-          <ContactsList
-            onSelectContact={handleSelectContact}
-            onCreateGroup={handleCreateGroup}
-            onBack={handleBackToAuth}
-          />
-        </motion.div>
-      )}
-
-      {appState === 'pairing' && (
-        <motion.div
-          key="pairing"
-          initial={{ opacity: 0, x: -50 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: 50 }}
-          transition={{ duration: 0.3 }}
-        >
-          <SocketProvider>
-            <Pairing onPaired={(partnerInfo) => {
-              const contact: Contact = {
-                id: partnerInfo.id,
-                email: partnerInfo.email,
-                isOnline: true,
-                status: 'online'
-              };
-              handleSelectContact(contact);
-            }} />
-          </SocketProvider>
-        </motion.div>
-      )}
-
-      {appState === 'chat' && partner && (
-        <motion.div
-          key="chat"
-          initial={{ opacity: 0, x: -50 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: 50 }}
-          transition={{ duration: 0.3 }}
-        >
-          <SocketProvider>
-            <Chat partner={partner} onDisconnect={handleDisconnect} />
-          </SocketProvider>
-        </motion.div>
-      )}
-
-      {appState === 'group-chat' && currentGroup && (
-        <motion.div
-          key="group-chat"
-          initial={{ opacity: 0, x: -50 }}
-          animate={{ opacity: 1, x: 0 }}
-          exit={{ opacity: 0, x: 50 }}
-          transition={{ duration: 0.3 }}
-        >
-          <SocketProvider>
-            <GroupChat 
-              group={currentGroup} 
-              onBack={handleBackToContacts}
-              onUpdateGroup={handleUpdateGroup}
+    <div className="bg-[#F0F2F5] min-h-screen">
+      <AnimatePresence mode="wait">
+        
+        {appState === 'contacts' && (
+          <motion.div
+            key="contacts"
+            className="h-full"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            transition={{ duration: 0.2 }}
+          >
+            <ContactsList
+              onSelectContact={handleSelectContact}
+              onCreateGroup={handleCreateGroup}
+              onBack={handleBackToAuth}
             />
-          </SocketProvider>
-        </motion.div>
-      )}
-    </AnimatePresence>
+          </motion.div>
+        )}
+
+        {appState === 'pairing' && (
+          <motion.div
+            key="pairing"
+            className="h-full"
+            initial={{ opacity: 0, x: 20 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -20 }}
+            transition={{ duration: 0.2 }}
+          >
+            <SocketProvider>
+              <Pairing onPaired={(partnerInfo) => {
+                const contact: Contact = {
+                  id: partnerInfo.id,
+                  email: partnerInfo.email,
+                  isOnline: true,
+                  status: 'online'
+                };
+                handleSelectContact(contact);
+              }} />
+            </SocketProvider>
+          </motion.div>
+        )}
+
+        {appState === 'chat' && partner && (
+          <motion.div
+            key="chat"
+            className="h-full"
+            initial={{ opacity: 0, x: 50 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 50 }}
+            transition={{ duration: 0.3, ease: "easeInOut" }}
+          >
+            <SocketProvider>
+              <Chat partner={partner} onDisconnect={handleDisconnect} onBack={handleBackToContacts} />
+            </SocketProvider>
+          </motion.div>
+        )}
+
+        {appState === 'group-chat' && currentGroup && (
+          <motion.div
+            key="group-chat"
+            className="h-full"
+            initial={{ opacity: 0, x: 50 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: 50 }}
+            transition={{ duration: 0.3, ease: "easeInOut" }}
+          >
+            <SocketProvider>
+              <GroupChat 
+                group={currentGroup} 
+                onBack={handleBackToContacts}
+                onUpdateGroup={handleUpdateGroup}
+              />
+            </SocketProvider>
+          </motion.div>
+        )}
+        
+      </AnimatePresence>
+    </div>
   );
 }
