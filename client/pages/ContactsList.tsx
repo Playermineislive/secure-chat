@@ -1,10 +1,9 @@
 import React, { useState, useEffect } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { useAuth } from '../contexts/AuthContext';
-import { useContacts, Contact, Group } from '../contexts/ContactContext';
+import { useContacts, Contact } from '../contexts/ContactContext';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -19,23 +18,20 @@ import {
   Copy,
   Check,
   QrCode,
-  Shield,
   Star,
   Clock,
   Wifi,
-  WifiOff,
   RefreshCw,
   Settings,
   ArrowLeft,
   MoreVertical,
   Heart,
-  Crown,
-  Sparkles,
   Send,
   AlertCircle,
   CheckCircle,
   Edit2,
-  User
+  X,
+  Filter
 } from 'lucide-react';
 
 interface ContactsListProps {
@@ -55,8 +51,6 @@ export default function ContactsList({ onSelectContact, onCreateGroup, onBack }:
     generateNewInviteCode,
     addFriendByCode,
     sendFriendRequest,
-    acceptFriendRequest,
-    rejectFriendRequest,
     searchContacts,
     getFavoriteContacts,
     getOnlineContacts,
@@ -68,63 +62,38 @@ export default function ContactsList({ onSelectContact, onCreateGroup, onBack }:
   } = useContacts();
 
   const [searchQuery, setSearchQuery] = useState('');
-  const [activeTab, setActiveTab] = useState<'contacts' | 'groups' | 'invites' | 'requests'>('contacts');
+  const [activeTab, setActiveTab] = useState<'contacts' | 'groups' | 'requests' | 'invites'>('contacts');
   const [selectedContacts, setSelectedContacts] = useState<string[]>([]);
   const [isSelectionMode, setIsSelectionMode] = useState(false);
   const [copiedCode, setCopiedCode] = useState(false);
   const [filterBy, setFilterBy] = useState<'all' | 'online' | 'favorites' | 'recent'>('all');
-  const [isOnline, setIsOnline] = useState(navigator.onLine);
-  const [showQRCode, setShowQRCode] = useState(false);
   const [newFriendEmail, setNewFriendEmail] = useState('');
   const [addFriendCode, setAddFriendCode] = useState('');
   const [showAddFriend, setShowAddFriend] = useState(false);
   const [successMessage, setSuccessMessage] = useState('');
   const [showProfileSettings, setShowProfileSettings] = useState(false);
   const [renamingContact, setRenamingContact] = useState<Contact | null>(null);
+  const [showSearch, setShowSearch] = useState(false);
 
-  useEffect(() => {
-    const handleOnline = () => setIsOnline(true);
-    const handleOffline = () => setIsOnline(false);
-    
-    window.addEventListener('online', handleOnline);
-    window.addEventListener('offline', handleOffline);
-    
-    return () => {
-      window.removeEventListener('online', handleOnline);
-      window.removeEventListener('offline', handleOffline);
-    };
-  }, []);
-
+  // Filter Logic
   const getFilteredContacts = () => {
-    let filteredContacts = contacts;
-    
+    let filtered = contacts;
     if (searchQuery) {
-      filteredContacts = searchContacts(searchQuery);
+      filtered = searchContacts(searchQuery);
     } else {
       switch (filterBy) {
-        case 'online':
-          filteredContacts = getOnlineContacts();
-          break;
-        case 'favorites':
-          filteredContacts = getFavoriteContacts();
-          break;
-        case 'recent':
-          filteredContacts = getRecentContacts();
-          break;
-        default:
-          filteredContacts = contacts;
+        case 'online': filtered = getOnlineContacts(); break;
+        case 'favorites': filtered = getFavoriteContacts(); break;
+        case 'recent': filtered = getRecentContacts(); break;
+        default: break;
       }
     }
-
-    return filteredContacts;
+    return filtered;
   };
 
   const filteredContacts = getFilteredContacts();
-  const filteredGroups = groups.filter(group =>
-    group.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-    group.description?.toLowerCase().includes(searchQuery.toLowerCase())
-  );
 
+  // Handlers
   const handleSelectContact = (contact: Contact) => {
     if (isSelectionMode) {
       setSelectedContacts(prev =>
@@ -140,7 +109,6 @@ export default function ContactsList({ onSelectContact, onCreateGroup, onBack }:
   const handleCreateGroup = () => {
     const selectedContactObjects = contacts.filter(c => selectedContacts.includes(c.id));
     if (selectedContactObjects.length >= 1) {
-      const newGroup = createGroup(`Group with ${selectedContactObjects.map(c => c.username || c.email).join(', ')}`, selectedContactObjects);
       onCreateGroup(selectedContactObjects);
       setIsSelectionMode(false);
       setSelectedContacts([]);
@@ -149,503 +117,385 @@ export default function ContactsList({ onSelectContact, onCreateGroup, onBack }:
 
   const copyInviteCode = async () => {
     if (!currentInviteCode) return;
-    
     try {
       await navigator.clipboard.writeText(currentInviteCode.code);
       setCopiedCode(true);
       setTimeout(() => setCopiedCode(false), 2000);
-    } catch (error) {
-      console.error('Failed to copy code:', error);
-    }
-  };
-
-  const handleAddFriendByCode = async () => {
-    if (!addFriendCode.trim()) return;
-    
-    const success = await addFriendByCode(addFriendCode, {
-      email: `user_${addFriendCode.toLowerCase()}@example.com`,
-      username: `User ${addFriendCode}`
-    });
-    
-    if (success) {
-      setAddFriendCode('');
-      setSuccessMessage('Friend added successfully!');
-      setTimeout(() => setSuccessMessage(''), 3000);
-    }
+    } catch (error) { console.error('Failed to copy', error); }
   };
 
   const handleSendFriendRequest = async () => {
     if (!newFriendEmail.trim()) return;
-    
     const success = await sendFriendRequest(newFriendEmail);
     if (success) {
       setNewFriendEmail('');
       setSuccessMessage('Friend request sent!');
       setTimeout(() => setSuccessMessage(''), 3000);
+      setShowAddFriend(false);
     }
   };
 
-  const getStatusColor = (status?: string) => {
-    switch (status) {
-      case 'online': return 'bg-green-500';
-      case 'away': return 'bg-yellow-500';
-      case 'busy': return 'bg-red-500';
-      default: return 'bg-gray-500';
+  const handleAddFriendByCode = async () => {
+    if (!addFriendCode.trim()) return;
+    const success = await addFriendByCode(addFriendCode, {
+      email: `user_${addFriendCode}@example.com`,
+      username: `User ${addFriendCode}`
+    });
+    if (success) {
+      setAddFriendCode('');
+      setSuccessMessage('Friend added!');
+      setTimeout(() => setSuccessMessage(''), 3000);
+      setShowAddFriend(false);
     }
   };
 
-  const formatLastSeen = (timestamp: string) => {
-    const diff = Date.now() - new Date(timestamp).getTime();
-    const minutes = Math.floor(diff / 60000);
-    const hours = Math.floor(diff / 3600000);
-    const days = Math.floor(diff / 86400000);
-
-    if (minutes < 1) return 'Just now';
-    if (minutes < 60) return `${minutes}m ago`;
-    if (hours < 24) return `${hours}h ago`;
-    return `${days}d ago`;
-  };
-
-  const tabs = [
-    { id: 'contacts', label: 'Contacts', icon: Users, count: contacts.length },
-    { id: 'groups', label: 'Groups', icon: MessageCircle, count: groups.length },
-    { id: 'requests', label: 'Requests', icon: UserPlus, count: pendingRequests.length },
-    { id: 'invites', label: 'Invite', icon: UserPlus, count: 0 }
-  ] as const;
-
-  const filters = [
-    { id: 'all', label: 'All', icon: Users },
-    { id: 'online', label: 'Online', icon: Wifi },
-    { id: 'favorites', label: 'Favorites', icon: Star },
-    { id: 'recent', label: 'Recent', icon: Clock }
-  ] as const;
+  // UI Components
+  const TabButton = ({ id, label, icon: Icon, count }: any) => (
+    <button
+      onClick={() => setActiveTab(id)}
+      className={`flex-1 py-4 text-sm font-medium border-b-2 transition-colors relative ${
+        activeTab === id 
+          ? 'border-indigo-600 text-indigo-600' 
+          : 'border-transparent text-slate-500 hover:text-slate-700'
+      }`}
+    >
+      <div className="flex items-center justify-center space-x-2">
+        <Icon className="w-4 h-4" />
+        <span>{label}</span>
+        {count > 0 && (
+          <span className="bg-indigo-100 text-indigo-600 px-1.5 py-0.5 rounded-full text-[10px]">
+            {count}
+          </span>
+        )}
+      </div>
+    </button>
+  );
 
   return (
-    <div className="h-screen flex flex-col bg-gradient-to-br from-purple-600 via-blue-600 to-cyan-600 relative overflow-hidden">
-      {/* Header */}
-      <motion.header 
-        className="relative z-10 bg-white/10 backdrop-blur-xl border-b border-white/20"
-        initial={{ y: -50, opacity: 0 }}
-        animate={{ y: 0, opacity: 1 }}
-        transition={{ duration: 0.5 }}
-      >
-        <div className="flex items-center justify-between p-4">
+    <div className="flex flex-col h-screen bg-[#F0F2F5] font-sans text-slate-900 relative overflow-hidden">
+      
+      {/* --- APP BAR --- */}
+      <header className="bg-white shadow-sm z-30 sticky top-0">
+        
+        {/* Top Row: Navigation & Actions */}
+        <div className="px-4 py-3 flex items-center justify-between">
           <div className="flex items-center space-x-4">
-            <motion.button
-              onClick={onBack}
-              className="w-10 h-10 bg-white/10 hover:bg-white/20 rounded-[1rem] flex items-center justify-center text-white/70 hover:text-white transition-all duration-200 backdrop-blur-sm"
-              whileHover={{ scale: 1.1, x: -2 }}
-              whileTap={{ scale: 0.9 }}
-            >
-              <ArrowLeft className="w-5 h-5" />
-            </motion.button>
+            {isSelectionMode ? (
+              <button onClick={() => setIsSelectionMode(false)} className="p-2 hover:bg-slate-100 rounded-full">
+                <X className="w-6 h-6 text-slate-600" />
+              </button>
+            ) : (
+              <button onClick={onBack} className="p-2 hover:bg-slate-100 rounded-full">
+                <ArrowLeft className="w-6 h-6 text-slate-600" />
+              </button>
+            )}
             
-            <div className="flex items-center space-x-3">
-              <motion.div
-                onClick={() => setShowProfileSettings(true)}
-                className="cursor-pointer"
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                <Avatar className="w-12 h-12 border-2 border-white/20">
-                  <AvatarImage src={userProfile?.avatar} />
-                  <AvatarFallback className="bg-gradient-to-br from-purple-400 to-blue-500 text-white font-bold">
-                    {userProfile?.username?.charAt(0) || userProfile?.email.charAt(0).toUpperCase()}
-                  </AvatarFallback>
-                </Avatar>
-              </motion.div>
-
-              <div>
-                <h1 className="text-2xl font-bold text-white">SecureChat</h1>
-                <p className="text-white/70 text-sm">
-                  {isOnline ? `${getOnlineContacts().length} online` : 'Offline'}
-                </p>
-              </div>
+            <div className="flex flex-col">
+              {isSelectionMode ? (
+                <>
+                  <h1 className="text-lg font-bold text-slate-800">{selectedContacts.length} Selected</h1>
+                  <p className="text-xs text-slate-500">Tap to select</p>
+                </>
+              ) : (
+                <>
+                  <h1 className="text-xl font-bold text-slate-800 tracking-tight">SecureChat</h1>
+                  <p className="text-xs text-indigo-600 font-medium">{user?.email}</p>
+                </>
+              )}
             </div>
           </div>
 
-          <div className="flex items-center space-x-2">
-            <motion.button
-              onClick={() => setIsSelectionMode(!isSelectionMode)}
-              className={`w-10 h-10 rounded-[1rem] flex items-center justify-center transition-all duration-200 backdrop-blur-sm ${
-                isSelectionMode 
-                  ? 'bg-blue-500/30 text-blue-300' 
-                  : 'bg-white/10 hover:bg-white/20 text-white/70 hover:text-white'
-              }`}
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-              title="Create Group"
-            >
-              <Plus className="w-5 h-5" />
-            </motion.button>
-
-            <motion.button
-              onClick={() => setShowAddFriend(!showAddFriend)}
-              className="w-10 h-10 bg-white/10 hover:bg-white/20 rounded-[1rem] flex items-center justify-center text-white/70 hover:text-white transition-all duration-200 backdrop-blur-sm"
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-              title="Add Friend"
-            >
-              <UserPlus className="w-5 h-5" />
-            </motion.button>
-
-            <motion.button
-              onClick={() => setShowProfileSettings(true)}
-              className="w-10 h-10 bg-white/10 hover:bg-white/20 rounded-[1rem] flex items-center justify-center text-white/70 hover:text-white transition-all duration-200 backdrop-blur-sm"
-              whileHover={{ scale: 1.1 }}
-              whileTap={{ scale: 0.9 }}
-              title="Profile Settings"
-            >
-              <Settings className="w-5 h-5" />
-            </motion.button>
+          <div className="flex items-center space-x-1">
+             {isSelectionMode ? (
+               <Button 
+                 size="sm" 
+                 onClick={handleCreateGroup} 
+                 disabled={selectedContacts.length === 0}
+                 className="bg-indigo-600 text-white hover:bg-indigo-700"
+               >
+                 Create
+               </Button>
+             ) : (
+               <>
+                 <button onClick={() => setShowSearch(!showSearch)} className="p-2 text-slate-600 hover:bg-slate-100 rounded-full">
+                   <Search className="w-5 h-5" />
+                 </button>
+                 <button onClick={() => setShowProfileSettings(true)} className="p-2 text-slate-600 hover:bg-slate-100 rounded-full">
+                   <Avatar className="w-8 h-8">
+                     <AvatarImage src={userProfile?.avatar} />
+                     <AvatarFallback className="bg-indigo-100 text-indigo-600 text-xs">
+                       {userProfile?.username?.charAt(0) || user?.email?.charAt(0)}
+                     </AvatarFallback>
+                   </Avatar>
+                 </button>
+               </>
+             )}
           </div>
         </div>
 
-        {/* Quick add friend panel */}
+        {/* Collapsible Search Bar */}
         <AnimatePresence>
-          {showAddFriend && (
-            <motion.div
-              className="bg-white/5 border-t border-white/10 p-4"
-              initial={{ height: 0, opacity: 0 }}
-              animate={{ height: 'auto', opacity: 1 }}
+          {showSearch && (
+            <motion.div 
+              initial={{ height: 0, opacity: 0 }} 
+              animate={{ height: 'auto', opacity: 1 }} 
               exit={{ height: 0, opacity: 0 }}
-              transition={{ duration: 0.3 }}
+              className="px-4 pb-2"
             >
-              <div className="space-y-3">
-                <div className="flex space-x-2">
-                  <Input
-                    placeholder="Enter friend's email"
-                    value={newFriendEmail}
-                    onChange={(e) => setNewFriendEmail(e.target.value)}
-                    className="bg-white/10 border-white/20 text-white placeholder:text-white/60 rounded-[1.5rem] flex-1"
-                    type="email"
-                  />
-                  <Button
-                    onClick={handleSendFriendRequest}
-                    disabled={!newFriendEmail.trim() || isLoading}
-                    className="bg-blue-500 hover:bg-blue-600 text-white rounded-[1.5rem]"
-                  >
-                    <Send className="w-4 h-4" />
-                  </Button>
-                </div>
-                
-                <div className="flex items-center text-white/60 text-sm">
-                  <div className="flex-1 h-px bg-white/20"></div>
-                  <span className="px-3">or use invite code</span>
-                  <div className="flex-1 h-px bg-white/20"></div>
-                </div>
-                
-                <div className="flex space-x-2">
-                  <Input
-                    placeholder="Enter invite code"
-                    value={addFriendCode}
-                    onChange={(e) => setAddFriendCode(e.target.value.toUpperCase())}
-                    className="bg-white/10 border-white/20 text-white placeholder:text-white/60 rounded-[1.5rem] flex-1 uppercase tracking-wider text-center"
-                    maxLength={8}
-                  />
-                  <Button
-                    onClick={handleAddFriendByCode}
-                    disabled={!addFriendCode.trim() || isLoading}
-                    className="bg-green-500 hover:bg-green-600 text-white rounded-[1.5rem]"
-                  >
-                    <UserPlus className="w-4 h-4" />
-                  </Button>
-                </div>
-              </div>
+              <Input
+                placeholder="Search..."
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                className="bg-slate-100 border-none focus:ring-2 focus:ring-indigo-500/50"
+                autoFocus
+              />
             </motion.div>
           )}
         </AnimatePresence>
 
-        {/* Search bar */}
-        <div className="px-4 pb-4">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-5 h-5 text-white/60" />
-            <Input
-              placeholder="Search contacts, groups..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="bg-white/10 border-white/20 text-white placeholder:text-white/60 rounded-[1.5rem] pl-10 backdrop-blur-sm focus:ring-2 focus:ring-white/30"
-            />
-          </div>
+        {/* Tab Bar */}
+        <div className="flex px-2 border-t border-slate-100">
+          <TabButton id="contacts" label="Chats" icon={Users} count={0} />
+          <TabButton id="groups" label="Groups" icon={MessageCircle} count={groups.length} />
+          <TabButton id="requests" label="Requests" icon={UserPlus} count={pendingRequests.length} />
+          <TabButton id="invites" label="Invite" icon={QrCode} count={0} />
         </div>
+      </header>
 
-        {/* Tabs */}
-        <div className="flex items-center justify-center space-x-2 px-4 pb-4">
-          {tabs.map((tab) => {
-            const isActive = activeTab === tab.id;
-            return (
-              <motion.button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`flex items-center space-x-2 px-4 py-2 rounded-[1.5rem] transition-all duration-200 ${
-                  isActive
-                    ? 'bg-white/20 text-white shadow-lg'
-                    : 'bg-white/5 text-white/70 hover:bg-white/10 hover:text-white'
-                }`}
-                whileHover={{ scale: 1.05 }}
-                whileTap={{ scale: 0.95 }}
-              >
-                <tab.icon className="w-4 h-4" />
-                <span className="text-sm font-medium">{tab.label}</span>
-                {tab.count > 0 && (
-                  <Badge variant="secondary" className="bg-white/20 text-white text-xs">
-                    {tab.count}
-                  </Badge>
-                )}
-              </motion.button>
-            );
-          })}
-        </div>
-
-        {/* Filters for contacts tab */}
-        {activeTab === 'contacts' && (
-          <motion.div 
-            className="flex items-center space-x-2 px-4 pb-4 overflow-x-auto"
-            initial={{ opacity: 0, y: -10 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3 }}
-          >
-            {filters.map((filter) => {
-              const isActive = filterBy === filter.id;
-              return (
-                <motion.button
-                  key={filter.id}
-                  onClick={() => setFilterBy(filter.id as any)}
-                  className={`flex items-center space-x-1 px-3 py-1 rounded-[1rem] transition-all duration-200 whitespace-nowrap ${
-                    isActive
-                      ? 'bg-white/20 text-white'
-                      : 'bg-white/5 text-white/60 hover:bg-white/10 hover:text-white'
-                  }`}
-                  whileHover={{ scale: 1.05 }}
-                  whileTap={{ scale: 0.95 }}
-                >
-                  <filter.icon className="w-3 h-3" />
-                  <span className="text-xs">{filter.label}</span>
-                </motion.button>
-              );
-            })}
-          </motion.div>
-        )}
-
-        {/* Success/Error Messages */}
-        <AnimatePresence>
-          {(successMessage || error) && (
-            <motion.div
-              className="px-4 pb-4"
-              initial={{ opacity: 0, y: -10 }}
-              animate={{ opacity: 1, y: 0 }}
-              exit={{ opacity: 0, y: -10 }}
-            >
-              <Alert className={`${
-                successMessage 
-                  ? 'bg-green-500/20 border-green-400/50 text-green-300' 
-                  : 'bg-red-500/20 border-red-400/50 text-red-300'
-              } backdrop-blur-sm rounded-[1.5rem]`}>
-                {successMessage ? <CheckCircle className="w-4 h-4" /> : <AlertCircle className="w-4 h-4" />}
-                <AlertDescription>
-                  {successMessage || error}
-                </AlertDescription>
-              </Alert>
-            </motion.div>
-          )}
-        </AnimatePresence>
-      </motion.header>
-
-      {/* Content */}
-      <div className="flex-1 overflow-hidden relative z-10">
-        <div className="h-full overflow-y-auto p-4 space-y-4">
-          <AnimatePresence mode="wait">
-            {activeTab === 'contacts' && (
-              <motion.div
-                key="contacts"
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 20 }}
-                transition={{ duration: 0.3 }}
-                className="space-y-3"
-              >
-                {filteredContacts.map((contact, index) => {
-                  const isSelected = selectedContacts.includes(contact.id);
-                  return (
-                    <motion.div
-                      key={contact.id}
-                      initial={{ opacity: 0, y: 20 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      transition={{ delay: index * 0.05, duration: 0.3 }}
-                      whileHover={{ scale: 1.02, y: -2 }}
-                      whileTap={{ scale: 0.98 }}
-                    >
-                      <Card 
-                        className={`bg-white/10 backdrop-blur-sm border-white/20 hover:bg-white/15 transition-all duration-200 cursor-pointer relative overflow-hidden ${
-                          isSelected ? 'ring-2 ring-blue-400/50 bg-blue-500/20' : ''
-                        }`}
-                        onClick={() => handleSelectContact(contact)}
-                      >
-                        <CardContent className="p-4 relative z-10">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center space-x-3">
-                              <div className="relative">
-                                <div className="w-12 h-12 bg-gradient-to-br from-purple-400 to-blue-500 rounded-[1.5rem] flex items-center justify-center text-white font-semibold text-lg border-2 border-white/20">
-                                  {contact.username?.charAt(0) || contact.email.charAt(0).toUpperCase()}
-                                </div>
-                                <motion.div 
-                                  className={`absolute -bottom-1 -right-1 w-4 h-4 ${getStatusColor(contact.status)} rounded-full border-2 border-white`}
-                                  animate={contact.isOnline ? { scale: [1, 1.2, 1] } : {}}
-                                  transition={{ duration: 2, repeat: Infinity }}
-                                />
-                              </div>
-                              
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center space-x-2">
-                                  <h3 className="text-white font-medium truncate">
-                                    {contact.displayName || contact.username || contact.email}
-                                  </h3>
-                                  {contact.isFavorite && (
-                                    <Heart className="w-4 h-4 text-red-400 fill-current" />
-                                  )}
-                                  {contact.displayName && (
-                                    <Edit2 className="w-3 h-3 text-white/50" />
-                                  )}
-                                </div>
-
-                                <p className="text-white/60 text-sm truncate">
-                                  {contact.lastMessage?.content || contact.email}
-                                </p>
-                              </div>
-                            </div>
-                            
-                            <div className="flex flex-col items-end space-y-2">
-                              {contact.unreadCount! > 0 && (
-                                <motion.div
-                                  className="w-6 h-6 bg-red-500 rounded-full flex items-center justify-center"
-                                  animate={{ scale: [1, 1.1, 1] }}
-                                  transition={{ duration: 1, repeat: Infinity }}
-                                >
-                                  <span className="text-white text-xs font-bold">
-                                    {contact.unreadCount}
-                                  </span>
-                                </motion.div>
-                              )}
-
-                              {!isSelectionMode && (
-                                <motion.button
-                                  className="w-8 h-8 bg-white/10 hover:bg-white/20 rounded-full flex items-center justify-center text-white/60 hover:text-white transition-all duration-200"
-                                  whileHover={{ scale: 1.1 }}
-                                  whileTap={{ scale: 0.9 }}
-                                  onClick={(e) => {
-                                    e.stopPropagation();
-                                    setRenamingContact(contact);
-                                  }}
-                                  title="Rename Contact"
-                                >
-                                  <Edit2 className="w-4 h-4" />
-                                </motion.button>
-                              )}
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </motion.div>
-                  );
-                })}
-                
-                {filteredContacts.length === 0 && (
-                  <motion.div
-                    initial={{ opacity: 0, y: 20 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    className="text-center py-12"
-                  >
-                    <Users className="w-16 h-16 text-white/30 mx-auto mb-4" />
-                    <h3 className="text-white text-lg font-medium mb-2">No contacts found</h3>
-                    <p className="text-white/60 text-sm mb-4">
-                      {searchQuery ? 'Try adjusting your search' : 'Start by adding some friends'}
-                    </p>
-                    <Button
-                      onClick={() => setShowAddFriend(true)}
-                      className="bg-blue-500 hover:bg-blue-600 text-white"
-                    >
-                      <UserPlus className="w-4 h-4 mr-2" />
-                      Add Friends
-                    </Button>
-                  </motion.div>
-                )}
-              </motion.div>
-            )}
-
-            {activeTab === 'invites' && (
-              <motion.div
-                key="invites"
-                initial={{ opacity: 0, x: -20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: 20 }}
-                transition={{ duration: 0.3 }}
-                className="space-y-6"
-              >
-                <Card className="bg-white/10 backdrop-blur-sm border-white/20 relative overflow-hidden">
-                  <CardHeader className="relative z-10">
-                    <CardTitle className="text-white flex items-center space-x-2">
-                      <QrCode className="w-5 h-5" />
-                      <span>Your Invite Code</span>
-                    </CardTitle>
-                  </CardHeader>
-                  <CardContent className="space-y-4 relative z-10">
-                    <div className="bg-white/10 rounded-[1.5rem] p-4 text-center">
-                      <div className="text-3xl font-bold text-white tracking-wider mb-2">
-                        {currentInviteCode?.code || 'LOADING...'}
-                      </div>
-                      <p className="text-white/60 text-sm">
-                        Share this code with friends to connect securely
-                      </p>
-                      <p className="text-white/50 text-xs mt-2">
-                        Code refreshes daily
-                      </p>
-                    </div>
-                    
-                    <div className="flex space-x-2">
-                      <Button
-                        onClick={copyInviteCode}
-                        className="flex-1 bg-white/10 hover:bg-white/20 text-white border border-white/20"
-                        variant="outline"
-                        disabled={!currentInviteCode}
-                      >
-                        {copiedCode ? (
-                          <>
-                            <Check className="w-4 h-4 mr-2" />
-                            Copied!
-                          </>
-                        ) : (
-                          <>
-                            <Copy className="w-4 h-4 mr-2" />
-                            Copy Code
-                          </>
-                        )}
-                      </Button>
-                      
-                      <Button
-                        onClick={generateNewInviteCode}
-                        className="bg-purple-500 hover:bg-purple-600 text-white"
-                      >
-                        <RefreshCw className="w-4 h-4 mr-2" />
-                        New Code
-                      </Button>
-                    </div>
-                  </CardContent>
-                </Card>
-              </motion.div>
-            )}
-          </AnimatePresence>
-        </div>
-      </div>
-
-      {/* Profile Settings Modal */}
+      {/* --- ADD FRIEND OVERLAY --- */}
       <AnimatePresence>
-        {showProfileSettings && (
-          <ProfileSettings onClose={() => setShowProfileSettings(false)} />
+        {showAddFriend && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: 'auto', opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="bg-indigo-50 border-b border-indigo-100 overflow-hidden"
+          >
+            <div className="p-4 space-y-3">
+               <div className="flex justify-between items-center">
+                 <h3 className="font-semibold text-indigo-900">Add New Contact</h3>
+                 <button onClick={() => setShowAddFriend(false)}><X className="w-4 h-4 text-indigo-400" /></button>
+               </div>
+               
+               <div className="flex space-x-2">
+                 <Input
+                   placeholder="Friend's Email"
+                   value={newFriendEmail}
+                   onChange={(e) => setNewFriendEmail(e.target.value)}
+                   className="bg-white"
+                 />
+                 <Button onClick={handleSendFriendRequest} className="bg-indigo-600 hover:bg-indigo-700">
+                   <Send className="w-4 h-4" />
+                 </Button>
+               </div>
+               
+               <div className="relative py-2">
+                 <div className="absolute inset-0 flex items-center"><span className="w-full border-t border-indigo-200"></span></div>
+                 <div className="relative flex justify-center text-xs uppercase"><span className="bg-indigo-50 px-2 text-indigo-400">Or via code</span></div>
+               </div>
+
+               <div className="flex space-x-2">
+                 <Input
+                   placeholder="8-Digit Code"
+                   value={addFriendCode}
+                   onChange={(e) => setAddFriendCode(e.target.value.toUpperCase())}
+                   className="bg-white text-center tracking-widest uppercase font-mono"
+                   maxLength={8}
+                 />
+                 <Button onClick={handleAddFriendByCode} className="bg-green-600 hover:bg-green-700">
+                   <UserPlus className="w-4 h-4" />
+                 </Button>
+               </div>
+            </div>
+          </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Contact Rename Modal */}
+      {/* --- NOTIFICATIONS --- */}
       <AnimatePresence>
+        {(successMessage || error) && (
+          <motion.div
+            initial={{ opacity: 0, y: -20 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -20 }}
+            className="absolute top-20 left-4 right-4 z-40"
+          >
+            <Alert className={`shadow-lg border-l-4 ${successMessage ? 'border-l-green-500 bg-white' : 'border-l-red-500 bg-white'}`}>
+              <div className="flex items-center">
+                {successMessage ? <CheckCircle className="w-4 h-4 text-green-500 mr-2" /> : <AlertCircle className="w-4 h-4 text-red-500 mr-2" />}
+                <AlertDescription className="text-slate-700 font-medium">
+                  {successMessage || error}
+                </AlertDescription>
+              </div>
+            </Alert>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* --- MAIN CONTENT AREA --- */}
+      <div className="flex-1 overflow-y-auto p-4 custom-scrollbar">
+        
+        {/* Filters (Chips) */}
+        {activeTab === 'contacts' && (
+          <div className="flex space-x-2 mb-4 overflow-x-auto pb-2 scrollbar-hide">
+            {[
+              { id: 'all', label: 'All', icon: Users },
+              { id: 'online', label: 'Online', icon: Wifi },
+              { id: 'favorites', label: 'Favorites', icon: Star },
+              { id: 'recent', label: 'Recent', icon: Clock }
+            ].map((f) => (
+              <button
+                key={f.id}
+                onClick={() => setFilterBy(f.id as any)}
+                className={`flex items-center space-x-1.5 px-3 py-1.5 rounded-full text-xs font-medium border transition-all whitespace-nowrap ${
+                  filterBy === f.id 
+                    ? 'bg-indigo-600 border-indigo-600 text-white shadow-sm' 
+                    : 'bg-white border-slate-200 text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                <f.icon className="w-3 h-3" />
+                <span>{f.label}</span>
+              </button>
+            ))}
+          </div>
+        )}
+
+        {/* Tab Content */}
+        <div className="space-y-2 pb-20"> {/* pb-20 for FAB space */}
+          
+          {/* CONTACTS LIST */}
+          {activeTab === 'contacts' && (
+            <>
+              {filteredContacts.length === 0 ? (
+                <div className="text-center py-12">
+                  <div className="w-16 h-16 bg-slate-100 rounded-full flex items-center justify-center mx-auto mb-4 text-slate-300">
+                    <Users className="w-8 h-8" />
+                  </div>
+                  <h3 className="text-slate-900 font-medium">No contacts found</h3>
+                  <p className="text-slate-500 text-sm mt-1">Try adding a new friend to start chatting.</p>
+                </div>
+              ) : (
+                filteredContacts.map((contact) => (
+                  <motion.div
+                    key={contact.id}
+                    layout
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    whileTap={{ scale: 0.98 }}
+                    onClick={() => handleSelectContact(contact)}
+                    className={`
+                      relative bg-white p-3 rounded-xl border border-slate-100 shadow-sm flex items-center space-x-3 cursor-pointer transition-all hover:shadow-md
+                      ${selectedContacts.includes(contact.id) ? 'ring-2 ring-indigo-500 bg-indigo-50/50' : ''}
+                    `}
+                  >
+                    <div className="relative">
+                      <Avatar className="w-12 h-12">
+                        <AvatarImage src={contact.avatar} />
+                        <AvatarFallback className={`text-white font-bold ${contact.isOnline ? 'bg-indigo-500' : 'bg-slate-400'}`}>
+                          {contact.username?.[0] || contact.email[0].toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      {contact.isOnline && (
+                        <span className="absolute bottom-0 right-0 w-3.5 h-3.5 bg-green-500 border-2 border-white rounded-full"></span>
+                      )}
+                    </div>
+
+                    <div className="flex-1 min-w-0">
+                      <div className="flex justify-between items-baseline">
+                         <h3 className="font-semibold text-slate-900 truncate">{contact.displayName || contact.username || contact.email}</h3>
+                         <span className="text-[10px] text-slate-400">12:30 PM</span>
+                      </div>
+                      <p className="text-sm text-slate-500 truncate flex items-center">
+                        {contact.isFavorite && <Heart className="w-3 h-3 text-red-500 mr-1 fill-current" />}
+                        {contact.lastMessage?.content || "Tap to start chatting"}
+                      </p>
+                    </div>
+
+                    {!isSelectionMode && (
+                      <button 
+                         onClick={(e) => { e.stopPropagation(); setRenamingContact(contact); }}
+                         className="p-2 text-slate-300 hover:text-indigo-600 transition-colors"
+                      >
+                        <Edit2 className="w-4 h-4" />
+                      </button>
+                    )}
+                  </motion.div>
+                ))
+              )}
+            </>
+          )}
+
+          {/* GROUPS LIST */}
+          {activeTab === 'groups' && (
+            groups.map((group) => (
+              <motion.div
+                key={group.id}
+                layout
+                className="bg-white p-3 rounded-xl border border-slate-100 shadow-sm flex items-center space-x-3 cursor-pointer hover:shadow-md"
+              >
+                <div className="w-12 h-12 bg-purple-100 rounded-full flex items-center justify-center text-purple-600">
+                  <Users className="w-6 h-6" />
+                </div>
+                <div>
+                  <h3 className="font-semibold text-slate-900">{group.name}</h3>
+                  <p className="text-sm text-slate-500">{group.members.length} members</p>
+                </div>
+              </motion.div>
+            ))
+          )}
+          
+          {/* INVITE TAB */}
+          {activeTab === 'invites' && (
+            <div className="bg-white rounded-2xl p-6 shadow-sm border border-slate-100 text-center space-y-6">
+              <div className="w-20 h-20 bg-indigo-50 rounded-full flex items-center justify-center mx-auto text-indigo-600">
+                <QrCode className="w-10 h-10" />
+              </div>
+              
+              <div>
+                <h3 className="text-lg font-bold text-slate-900">Your Invite Code</h3>
+                <p className="text-slate-500 text-sm">Share this code with friends to connect instantly.</p>
+              </div>
+
+              <div className="bg-slate-50 p-4 rounded-xl border border-slate-200">
+                <p className="text-3xl font-mono font-bold tracking-widest text-slate-800">
+                  {currentInviteCode?.code || '...'}
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                 <Button onClick={copyInviteCode} variant="outline" className="border-slate-200 hover:bg-slate-50">
+                    {copiedCode ? <Check className="w-4 h-4 mr-2" /> : <Copy className="w-4 h-4 mr-2" />}
+                    {copiedCode ? "Copied" : "Copy"}
+                 </Button>
+                 <Button onClick={generateNewInviteCode} className="bg-indigo-600 hover:bg-indigo-700">
+                    <RefreshCw className="w-4 h-4 mr-2" /> Regenerate
+                 </Button>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* --- FLOATING ACTION BUTTON (FAB) --- */}
+      <div className="absolute bottom-6 right-6 z-40 flex flex-col space-y-3 items-end">
+        {/* Expandable options could go here */}
+        
+        <motion.button
+          onClick={() => {
+            if (activeTab === 'contacts') setShowAddFriend(!showAddFriend);
+            else if (activeTab === 'groups') setIsSelectionMode(!isSelectionMode);
+          }}
+          className="w-14 h-14 bg-indigo-600 text-white rounded-2xl shadow-lg shadow-indigo-200 flex items-center justify-center hover:bg-indigo-700 transition-colors"
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+        >
+          {activeTab === 'groups' ? <Users className="w-6 h-6" /> : <UserPlus className="w-6 h-6" />}
+        </motion.button>
+      </div>
+
+      {/* --- MODALS --- */}
+      <AnimatePresence>
+        {showProfileSettings && <ProfileSettings onClose={() => setShowProfileSettings(false)} />}
         {renamingContact && (
           <ContactRename
             contact={renamingContact}
@@ -654,6 +504,7 @@ export default function ContactsList({ onSelectContact, onCreateGroup, onBack }:
           />
         )}
       </AnimatePresence>
+
     </div>
   );
 }
